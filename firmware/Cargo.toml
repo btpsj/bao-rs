@@ -1,0 +1,17 @@
+[package]
+name = "firmware"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "firmware"
+test = false
+bench = false
+
+[dependencies]
+riscv-rt = { version = "0.18.0", features = ["single-hart", "memory"] }
+riscv = "0.16.1"
+embedded-hal = "1.0.0"
+utralib = { version = "0.1.27", default-features = false, features = ["bao1x"] }
+panic-halt = "1.0.0"
