@@ -2,7 +2,9 @@
 
 use std::{env, fs, path::Path, process::Command};
 
-use bao1x_api::signatures::SIGBLOCK_LEN;
+use bao1x_api::signatures::{
+    BAOCHIP_SIG_VERSION, FunctionCode, MAGIC_NUMBER, SIGBLOCK_LEN, SignatureInFlash, UNSIGNED_LEN,
+};
 use eyre::{WrapErr, bail, ensure, eyre};
 use log::info;
 use xous_tools::sign_image::{Version, load_pem, sign_image};
@@ -14,8 +16,17 @@ use xous_tools::sign_image::{Version, load_pem, sign_image};
 /// A RAM section that became loadable makes objcopy pad the file out to ~16 MiB.
 const MAX_BIN: usize = 0x6016_0000 - 0x6006_0300;
 const TARGET: &str = "riscv32imac-unknown-none-elf";
+/// `jal x0, +SIGBLOCK_LEN`: boot1 jumps to the first word of the signature block, which hops to the code.
+const JAL_OVER_SIG: u32 = 0x3000_006F;
 /// Fixed, never bumped per build: a value above the chip's one-way counter raises it permanently.
 const ANTI_ROLLBACK: usize = 1;
+const _: () = assert!(
+    ANTI_ROLLBACK == 1,
+    "ANTI_ROLLBACK is fixed at 1: a higher value permanently raises the chip's counter"
+);
+
+// Pod reads use the host's byte order; the image is little-endian (RISC-V).
+const _: () = assert!(cfg!(target_endian = "little"));
 
 /// Why a build output failed its format check.
 #[derive(Debug, PartialEq, thiserror::Error)]
@@ -26,10 +37,20 @@ enum CheckError {
     BinTooBig { len: usize },
     #[error("img is {len} bytes, expected {expected} (sig block + bin)")]
     ImgLength { len: usize, expected: usize },
-    #[error("img word 0 is {word:#010x}, expected jal x0,+0x300 ({JAL_OVER_SIG:#010x})")]
+    #[error("img word 0 is {word:#010x}, expected jal x0,+{SIGBLOCK_LEN:#x} ({JAL_OVER_SIG:#010x})")]
     ImgJal { word: u32 },
     #[error("img payload after the sig block differs from the bin")]
     ImgPayload,
+    #[error("img magic is {magic:#010x?}, expected \"yumy\" \"Bao3\" ({MAGIC_NUMBER:#010x?})")]
+    ImgMagic { magic: [u32; 2] },
+    #[error("img version={version:#x}, expected {BAOCHIP_SIG_VERSION:#x}")]
+    ImgVersion { version: u32 },
+    #[error("img signed_len={signed_len:#x}, expected {expected:#x}")]
+    ImgSignedLen { signed_len: u32, expected: u32 },
+    #[error("img function_code={function_code}, expected baremetal ({})", FunctionCode::Baremetal as u32)]
+    ImgFunctionCode { function_code: u32 },
+    #[error("img anti_rollback={anti_rollback}, expected {ANTI_ROLLBACK}")]
+    ImgAntiRollback { anti_rollback: u32 },
 }
 
 /// The flat binary must exist and fit in the program space.
@@ -41,25 +62,55 @@ fn check_bin(bin: &[u8]) -> Result<(), CheckError> {
     }
 }
 
-/// The checker's own copy of the layout, so it doesn't trust xous-tools/bao1x-api to check themselves.
-const SIG_LEN: usize = 0x300;
-/// boot1 jumps to the first word of the signature block; it must hop over the block to the code.
-const JAL_OVER_SIG: u32 = 0x3000_006F;
+/// The header fields boot1 acts on, read back from a checked image.
+#[derive(Debug, PartialEq)]
+struct SigInfo {
+    version: u32,
+    function_code: u32,
+    anti_rollback: u32,
+}
 
-/// The image must be the signature block, starting with the jump over it, followed by `bin` unchanged.
-fn check_img(bin: &[u8], img: &[u8]) -> Result<(), CheckError> {
-    let expected = SIG_LEN + bin.len();
+
+/// The image must be the signature block, starting with the jump over it, followed by `bin` unchanged,
+/// and carry the header fields boot1 checks. The header is read as bao1x-api's `SignatureInFlash`, the
+/// struct boot1 is built from; reading the bytes back still catches xous-tools writing something else.
+fn check_img(bin: &[u8], img: &[u8]) -> Result<SigInfo, CheckError> {
+    let expected = SIGBLOCK_LEN + bin.len();
     if img.len() != expected {
         return Err(CheckError::ImgLength { len: img.len(), expected });
     }
-    let word = u32::from_le_bytes(img[0..4].try_into().unwrap());
-    if word != JAL_OVER_SIG {
-        return Err(CheckError::ImgJal { word });
+    let hdr: SignatureInFlash = bytemuck::pod_read_unaligned(&img[..size_of::<SignatureInFlash>()]);
+    if hdr._jal_instruction != JAL_OVER_SIG {
+        return Err(CheckError::ImgJal { word: hdr._jal_instruction });
     }
-    if img[SIG_LEN..] != *bin {
+    if img[SIGBLOCK_LEN..] != *bin {
         return Err(CheckError::ImgPayload);
     }
-    Ok(())
+
+    let sealed = hdr.sealed_data;
+    if sealed.magic != MAGIC_NUMBER {
+        return Err(CheckError::ImgMagic { magic: sealed.magic });
+    }
+    if sealed.version != BAOCHIP_SIG_VERSION {
+        return Err(CheckError::ImgVersion { version: sealed.version });
+    }
+    // The signature covers everything from the sealed fields to the end of the image.
+    let sealed_len = (img.len() - UNSIGNED_LEN) as u32;
+    if sealed.signed_len != sealed_len {
+        return Err(CheckError::ImgSignedLen { signed_len: sealed.signed_len, expected: sealed_len });
+    }
+    if sealed.function_code != FunctionCode::Baremetal as u32 {
+        return Err(CheckError::ImgFunctionCode { function_code: sealed.function_code });
+    }
+    // Still compared at run time: this checks the bytes xous-tools actually wrote.
+    if sealed.anti_rollback != ANTI_ROLLBACK as u32 {
+        return Err(CheckError::ImgAntiRollback { anti_rollback: sealed.anti_rollback });
+    }
+    Ok(SigInfo {
+        version: sealed.version,
+        function_code: sealed.function_code,
+        anti_rollback: sealed.anti_rollback,
+    })
 }
 
 /// Paths come from the xtask crate's location, so any working directory works.
@@ -199,10 +250,58 @@ mod tests {
         img
     }
 
+    const BAREMETAL_V1_ARB1: SigInfo = SigInfo { version: 0x100, function_code: 6, anti_rollback: 1 };
+
     #[test]
     fn img_valid_ok() {
         let bin = vec![0x13u8; 100];
-        assert!(check_img(&bin, &fake_img(&bin, 1, 6)).is_ok());
+        assert_eq!(check_img(&bin, &fake_img(&bin, 1, 6)), Ok(BAREMETAL_V1_ARB1));
+    }
+
+    #[test]
+    fn img_no_magic_rejected() {
+        let bin = vec![0x13u8; 100];
+        let mut img = fake_img(&bin, 1, 6);
+        img[0x88..0x90].fill(0);
+        assert_eq!(check_img(&bin, &img), Err(CheckError::ImgMagic { magic: [0, 0] }));
+    }
+
+    #[test]
+    fn img_wrong_version_rejected() {
+        let bin = vec![0x13u8; 100];
+        let mut img = fake_img(&bin, 1, 6);
+        img[0x84..0x88].copy_from_slice(&2u32.to_le_bytes()); // Precursor's LoaderPrehash
+        assert_eq!(check_img(&bin, &img), Err(CheckError::ImgVersion { version: 2 }));
+    }
+
+    #[test]
+    fn img_bad_signed_len_rejected() {
+        let bin = vec![0x13u8; 100];
+        let mut img = fake_img(&bin, 1, 6);
+        let good = (100 + 0x300 - 0x84) as u32;
+        img[0x90..0x94].copy_from_slice(&(good + 1).to_le_bytes());
+        assert_eq!(
+            check_img(&bin, &img),
+            Err(CheckError::ImgSignedLen { signed_len: good + 1, expected: good })
+        );
+    }
+
+    #[test]
+    fn img_wrong_function_code_rejected() {
+        let bin = vec![0x13u8; 100];
+        assert_eq!(
+            check_img(&bin, &fake_img(&bin, 1, 4)),
+            Err(CheckError::ImgFunctionCode { function_code: 4 })
+        );
+    }
+
+    #[test]
+    fn img_anti_rollback_2_rejected() {
+        let bin = vec![0x13u8; 100];
+        assert_eq!(
+            check_img(&bin, &fake_img(&bin, 2, 6)),
+            Err(CheckError::ImgAntiRollback { anti_rollback: 2 })
+        );
     }
 
     #[test]
@@ -246,19 +345,24 @@ mod tests {
         assert_eq!(img[0x300..], bin[..]);
     }
 
-    /// Verify the way boot1 does: Ed25519ph over SHA-512 of `img[0x84..0x84 + signed_len]`.
+    /// Cross-check: the offsets `check_img` reads match what xous-tools actually writes.
+    #[test]
+    fn sign_passes_check_img() {
+        let bin = vec![0x13u8; 1000];
+        let img = sign(&bin, &dev_key()).unwrap();
+        assert_eq!(check_img(&bin, &img), Ok(BAREMETAL_V1_ARB1));
+    }
+
+    /// Verify the way boot1 does: Ed25519ph over SHA-512 of `img[0x84..0x84 + signed_len]`, with the
+    /// developer public key boot1 holds in key slot 3. This also proves `devkey/dev.key` is that key.
     #[test]
     fn sign_signature_verifies() {
-        use ed25519_dalek::{Signature, SigningKey};
+        use ed25519_dalek::{Signature, VerifyingKey};
         use sha2::{Digest, Sha512};
 
         let bin = vec![0x13u8; 1000];
         let img = sign(&bin, &dev_key()).unwrap();
-
-        // An Ed25519 PKCS#8 key is a fixed 16-byte DER header followed by the 32-byte secret.
-        let der = xous_tools::sign_image::load_pem(dev_key().to_str().unwrap()).unwrap().contents;
-        assert_eq!(der.len(), 48);
-        let vk = SigningKey::from_bytes(der[16..].try_into().unwrap()).verifying_key();
+        let vk = VerifyingKey::from_bytes(&bao1x_api::pubkeys::developer::PUB).unwrap();
 
         let signed_len = u32::from_le_bytes(img[0x90..0x94].try_into().unwrap()) as usize;
         let digest = Sha512::new_with_prefix(&img[0x84..0x84 + signed_len]);
