@@ -5,16 +5,18 @@ use std::{env, fs, path::Path, process::Command};
 use bao1x_api::signatures::{
     BAOCHIP_SIG_VERSION, FunctionCode, MAGIC_NUMBER, SIGBLOCK_LEN, SignatureInFlash, UNSIGNED_LEN,
 };
+use bao1x_api::{BAOCHIP_1X_UF2_FAMILY, BAREMETAL_START};
 use eyre::{WrapErr, bail, ensure, eyre};
 use log::info;
-use xous_tools::sign_image::{Version, load_pem, sign_image};
+use xous_tools::sign_image::{Version, bin_to_uf2, load_pem, sign_image};
 
-/// Largest flat `.bin` that fits the program space, 0x60060300..0x60160000
-/// (1,047,296 bytes; equal to FLASH `LENGTH` in `firmware/memory.x`).
+/// End of the program space; code runs 0x60060300..0x60160000 (FLASH in `firmware/memory.x`).
 /// Source: dabao-sdk `bao1x.ld` lines 21-28,
 /// https://github.com/ArmstrongSubero/dabao-sdk/blob/fcf8a38873fd742b38da0578a9e86e294cbb0d89/bao1x.ld#L21-L28
+const PROGRAM_END: usize = 0x6016_0000;
+/// Largest flat `.bin` that fits after the signature block (1,047,296 bytes).
 /// A RAM section that became loadable makes objcopy pad the file out to ~16 MiB.
-const MAX_BIN: usize = 0x6016_0000 - 0x6006_0300;
+const MAX_BIN: usize = PROGRAM_END - (BAREMETAL_START + SIGBLOCK_LEN);
 const TARGET: &str = "riscv32imac-unknown-none-elf";
 /// `jal x0, +SIGBLOCK_LEN`: boot1 jumps to the first word of the signature block, which hops to the code.
 const JAL_OVER_SIG: u32 = 0x3000_006F;
@@ -51,7 +53,39 @@ enum CheckError {
     ImgFunctionCode { function_code: u32 },
     #[error("img anti_rollback={anti_rollback}, expected {ANTI_ROLLBACK}")]
     ImgAntiRollback { anti_rollback: u32 },
+    #[error("uf2 is {len} bytes, not a multiple of {UF2_BLOCK}")]
+    Uf2Length { len: usize },
+    #[error("uf2 block {block}: bad magic, flags or payload size")]
+    Uf2Header { block: usize },
+    #[error("uf2 block {block}: family={family:#010x}, expected {BAOCHIP_1X_UF2_FAMILY:#010x}")]
+    Uf2Family { block: usize, family: u32 },
+    #[error("uf2 block {block}: numbered {block_no} of {num_blocks}")]
+    Uf2Numbering { block: usize, block_no: u32, num_blocks: u32 },
+    #[error("uf2 block {block}: target={target:#010x}, not in order inside {BAREMETAL_START:#x}..{PROGRAM_END:#x}")]
+    Uf2Target { block: usize, target: u32 },
+    #[error("uf2 payloads differ from the img")]
+    Uf2Payload,
 }
+
+/// The 32-byte header of a 512-byte UF2 block (https://github.com/microsoft/uf2#file-format).
+/// xous-tools' `bin_to_uf2` keeps the UF2 constants private, so they are stated here.
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct Uf2Header {
+    magic: [u32; 2],
+    flags: u32,
+    target: u32,
+    size: u32,
+    block_no: u32,
+    num_blocks: u32,
+    family: u32,
+}
+const UF2_BLOCK: usize = 512;
+const UF2_PAYLOAD: usize = 256;
+const UF2_MAGIC: [u32; 2] = [0x0A32_4655, 0x9E5D_5157];
+const UF2_MAGIC_END: u32 = 0x0AB1_6F30;
+/// Flag: the `family` field is present.
+const UF2_FAMILY_PRESENT: u32 = 0x2000;
 
 /// The flat binary must exist and fit in the program space.
 fn check_bin(bin: &[u8]) -> Result<(), CheckError> {
@@ -111,6 +145,47 @@ fn check_img(bin: &[u8], img: &[u8]) -> Result<SigInfo, CheckError> {
         function_code: sealed.function_code,
         anti_rollback: sealed.anti_rollback,
     })
+}
+
+/// The UF2 must carry `img` as consecutive 256-byte payloads addressed from `BAREMETAL_START`,
+/// all below `PROGRAM_END`, so boot1 writes it into our slot. Returns the block count.
+fn check_uf2(img: &[u8], uf2: &[u8]) -> Result<usize, CheckError> {
+    if uf2.len() % UF2_BLOCK != 0 {
+        return Err(CheckError::Uf2Length { len: uf2.len() });
+    }
+    let total = uf2.len() / UF2_BLOCK;
+    let mut payload = Vec::with_capacity(total * UF2_PAYLOAD);
+    for (block, raw) in uf2.chunks_exact(UF2_BLOCK).enumerate() {
+        let h: Uf2Header = bytemuck::pod_read_unaligned(&raw[..size_of::<Uf2Header>()]);
+        let magic_end: u32 = bytemuck::pod_read_unaligned(&raw[UF2_BLOCK - 4..]);
+        if h.magic != UF2_MAGIC
+            || magic_end != UF2_MAGIC_END
+            || h.flags & UF2_FAMILY_PRESENT == 0
+            || h.size as usize != UF2_PAYLOAD
+        {
+            return Err(CheckError::Uf2Header { block });
+        }
+        if h.family != BAOCHIP_1X_UF2_FAMILY {
+            return Err(CheckError::Uf2Family { block, family: h.family });
+        }
+        if h.block_no as usize != block || h.num_blocks as usize != total {
+            return Err(CheckError::Uf2Numbering { block, block_no: h.block_no, num_blocks: h.num_blocks });
+        }
+        let target = h.target as usize;
+        if target != BAREMETAL_START + block * UF2_PAYLOAD || target + UF2_PAYLOAD > PROGRAM_END {
+            return Err(CheckError::Uf2Target { block, target: h.target });
+        }
+        let data = size_of::<Uf2Header>();
+        payload.extend_from_slice(&raw[data..data + UF2_PAYLOAD]);
+    }
+    // The last block is zero-padded past the end of the image.
+    if payload.len() < img.len()
+        || payload[..img.len()] != *img
+        || payload[img.len()..].iter().any(|&b| b != 0)
+    {
+        return Err(CheckError::Uf2Payload);
+    }
+    Ok(total)
 }
 
 /// Paths come from the xtask crate's location, so any working directory works.
@@ -177,6 +252,11 @@ fn sign(bin: &[u8], key: &Path) -> eyre::Result<Vec<u8>> {
         Some(ANTI_ROLLBACK),
     )
     .map_err(|e| eyre!("{e}"))
+}
+
+/// Wrap the signed image in UF2 blocks for boot1's USB drive, addressed from `BAREMETAL_START`.
+fn to_uf2(img: &[u8]) -> eyre::Result<Vec<u8>> {
+    bin_to_uf2(&img.to_vec(), BAOCHIP_1X_UF2_FAMILY, BAREMETAL_START as u32).wrap_err("encoding UF2")
 }
 
 fn build() -> eyre::Result<()> {
@@ -329,6 +409,50 @@ mod tests {
         let mut img = fake_img(&bin, 1, 6);
         img[0x300] ^= 0xFF;
         assert_eq!(check_img(&bin, &img), Err(CheckError::ImgPayload));
+    }
+
+    /// A 1000-byte bin's fake image (1768 bytes) and its UF2: 7 blocks of 512 bytes.
+    fn img_and_uf2() -> (Vec<u8>, Vec<u8>) {
+        let img = fake_img(&vec![0x13u8; 1000], 1, 6);
+        let uf2 = to_uf2(&img).unwrap();
+        (img, uf2)
+    }
+
+    #[test]
+    fn uf2_valid_ok() {
+        let (img, uf2) = img_and_uf2();
+        assert_eq!(check_uf2(&img, &uf2), Ok(7));
+    }
+
+    #[test]
+    fn uf2_block_below_base_rejected() {
+        let (img, mut uf2) = img_and_uf2();
+        uf2[12..16].copy_from_slice(&0x6005_FF00u32.to_le_bytes());
+        assert_eq!(
+            check_uf2(&img, &uf2),
+            Err(CheckError::Uf2Target { block: 0, target: 0x6005_FF00 })
+        );
+    }
+
+    #[test]
+    fn uf2_wrong_family_rejected() {
+        let (img, mut uf2) = img_and_uf2();
+        uf2[28..32].fill(0);
+        assert_eq!(check_uf2(&img, &uf2), Err(CheckError::Uf2Family { block: 0, family: 0 }));
+    }
+
+    #[test]
+    fn uf2_truncated_rejected() {
+        let (img, mut uf2) = img_and_uf2();
+        uf2.pop();
+        assert_eq!(check_uf2(&img, &uf2), Err(CheckError::Uf2Length { len: 7 * 512 - 1 }));
+    }
+
+    #[test]
+    fn uf2_payload_mismatch_rejected() {
+        let (img, mut uf2) = img_and_uf2();
+        uf2[32] ^= 0xFF;
+        assert_eq!(check_uf2(&img, &uf2), Err(CheckError::Uf2Payload));
     }
 
     fn dev_key() -> std::path::PathBuf {
