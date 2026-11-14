@@ -1,6 +1,10 @@
 //! `cargo xtask build`: turns the firmware ELF into a signed, checked `.uf2`.
 
-use std::{env, fs, path::Path, process::Command};
+use std::{
+    env, fs, io,
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 use bao1x_api::signatures::{
     BAOCHIP_SIG_VERSION, FunctionCode, MAGIC_NUMBER, SIGBLOCK_LEN, SignatureInFlash, UNSIGNED_LEN,
@@ -195,6 +199,11 @@ fn workspace_root() -> &'static Path {
         .expect("xtask is a subdirectory of the workspace")
 }
 
+/// The public Xous developer key (`devkey/README.md`); boot1 holds its public half in key slot 3.
+fn dev_key() -> PathBuf {
+    workspace_root().join("devkey/dev.key")
+}
+
 /// Log the command line, run it, and fail on a non-zero exit.
 fn run(cmd: &mut Command) -> eyre::Result<()> {
     info!("running {cmd:?}");
@@ -266,6 +275,18 @@ fn build() -> eyre::Result<()> {
     let out = target_dir.join(TARGET).join("release");
     let elf = out.join("firmware");
     let bin_path = out.join("firmware.bin");
+    let img_path = out.join("firmware.img");
+    let uf2_path = out.join("firmware.uf2");
+
+    // A failed build must not leave the previous .uf2 behind to be flashed by mistake.
+    info!("stage 0: remove old outputs");
+    for path in [&img_path, &uf2_path] {
+        match fs::remove_file(path) {
+            Ok(()) => info!("removed {}", path.display()),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e).wrap_err_with(|| format!("removing {}", path.display())),
+        }
+    }
 
     cargo_build(root, &target_dir)?;
     rust_objcopy(&elf, &bin_path)?;
@@ -273,6 +294,31 @@ fn build() -> eyre::Result<()> {
     let bin = fs::read(&bin_path).wrap_err_with(|| format!("reading {}", bin_path.display()))?;
     check_bin(&bin)?;
     info!("bin ok: {} bytes", bin.len());
+
+    let key = dev_key();
+    info!(
+        "stage 3: sign with {} (function_code=baremetal({}), anti_rollback={ANTI_ROLLBACK}, sig block={SIGBLOCK_LEN:#x}, semver=v0.0.0)",
+        key.display(),
+        FunctionCode::Baremetal as u32
+    );
+    let img = sign(&bin, &key)?;
+    let sig = check_img(&bin, &img)?;
+    info!("img ok: {} bytes, {sig:?}", img.len());
+
+    info!("stage 4: img -> UF2");
+    let uf2 = to_uf2(&img)?;
+    let blocks = check_uf2(&img, &uf2)?;
+    info!(
+        "uf2 ok: {blocks} blocks {BAREMETAL_START:#x}..{:#x}",
+        BAREMETAL_START + blocks * UF2_PAYLOAD
+    );
+
+    // Nothing is written before every check has passed; the .uf2 goes last.
+    info!("stage 5: write");
+    fs::write(&img_path, &img).wrap_err_with(|| format!("writing {}", img_path.display()))?;
+    fs::write(&uf2_path, &uf2).wrap_err_with(|| format!("writing {}", uf2_path.display()))?;
+    info!("wrote {}", img_path.display());
+    info!("wrote {}", uf2_path.display());
     Ok(())
 }
 
@@ -453,10 +499,6 @@ mod tests {
         let (img, mut uf2) = img_and_uf2();
         uf2[32] ^= 0xFF;
         assert_eq!(check_uf2(&img, &uf2), Err(CheckError::Uf2Payload));
-    }
-
-    fn dev_key() -> std::path::PathBuf {
-        workspace_root().join("devkey/dev.key")
     }
 
     #[test]
