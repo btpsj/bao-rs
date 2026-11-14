@@ -24,6 +24,12 @@ enum CheckError {
     BinEmpty,
     #[error("bin is {len} bytes (> {MAX_BIN})")]
     BinTooBig { len: usize },
+    #[error("img is {len} bytes, expected {expected} (sig block + bin)")]
+    ImgLength { len: usize, expected: usize },
+    #[error("img word 0 is {word:#010x}, expected jal x0,+0x300 ({JAL_OVER_SIG:#010x})")]
+    ImgJal { word: u32 },
+    #[error("img payload after the sig block differs from the bin")]
+    ImgPayload,
 }
 
 /// The flat binary must exist and fit in the program space.
@@ -33,6 +39,27 @@ fn check_bin(bin: &[u8]) -> Result<(), CheckError> {
         len if len > MAX_BIN => Err(CheckError::BinTooBig { len }),
         _ => Ok(()),
     }
+}
+
+/// The checker's own copy of the layout, so it doesn't trust xous-tools/bao1x-api to check themselves.
+const SIG_LEN: usize = 0x300;
+/// boot1 jumps to the first word of the signature block; it must hop over the block to the code.
+const JAL_OVER_SIG: u32 = 0x3000_006F;
+
+/// The image must be the signature block, starting with the jump over it, followed by `bin` unchanged.
+fn check_img(bin: &[u8], img: &[u8]) -> Result<(), CheckError> {
+    let expected = SIG_LEN + bin.len();
+    if img.len() != expected {
+        return Err(CheckError::ImgLength { len: img.len(), expected });
+    }
+    let word = u32::from_le_bytes(img[0..4].try_into().unwrap());
+    if word != JAL_OVER_SIG {
+        return Err(CheckError::ImgJal { word });
+    }
+    if img[SIG_LEN..] != *bin {
+        return Err(CheckError::ImgPayload);
+    }
+    Ok(())
 }
 
 /// Paths come from the xtask crate's location, so any working directory works.
@@ -152,6 +179,57 @@ mod tests {
     #[test]
     fn bin_small_ok() {
         assert!(check_bin(&vec![0x13u8; 1024]).is_ok());
+    }
+
+    /// A hand-built image with the fields boot1 reads, made without xous-tools.
+    fn fake_img(bin: &[u8], arb: u32, func: u32) -> Vec<u8> {
+        let mut img = vec![0u8; 0x300];
+        for (at, value) in [
+            (0x00, 0x3000_006F), // jal x0, +0x300
+            (0x84, 0x100),       // version
+            (0x88, 0x7975_6D79), // "yumy"
+            (0x8C, 0x4261_6F33), // "Bao3"
+            (0x90, (bin.len() + 0x300 - 0x84) as u32),
+            (0x94, func),
+            (0x98, arb),
+        ] {
+            img[at..at + 4].copy_from_slice(&u32::to_le_bytes(value));
+        }
+        img.extend_from_slice(bin);
+        img
+    }
+
+    #[test]
+    fn img_valid_ok() {
+        let bin = vec![0x13u8; 100];
+        assert!(check_img(&bin, &fake_img(&bin, 1, 6)).is_ok());
+    }
+
+    #[test]
+    fn img_wrong_length_rejected() {
+        let bin = vec![0x13u8; 100];
+        let mut img = fake_img(&bin, 1, 6);
+        img.push(0);
+        assert_eq!(
+            check_img(&bin, &img),
+            Err(CheckError::ImgLength { len: 0x300 + 101, expected: 0x300 + 100 })
+        );
+    }
+
+    #[test]
+    fn img_bad_jal_rejected() {
+        let bin = vec![0x13u8; 100];
+        let mut img = fake_img(&bin, 1, 6);
+        img[0..4].fill(0);
+        assert_eq!(check_img(&bin, &img), Err(CheckError::ImgJal { word: 0 }));
+    }
+
+    #[test]
+    fn img_payload_mismatch_rejected() {
+        let bin = vec![0x13u8; 100];
+        let mut img = fake_img(&bin, 1, 6);
+        img[0x300] ^= 0xFF;
+        assert_eq!(check_img(&bin, &img), Err(CheckError::ImgPayload));
     }
 
     fn dev_key() -> std::path::PathBuf {
