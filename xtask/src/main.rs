@@ -2,8 +2,10 @@
 
 use std::{env, fs, path::Path, process::Command};
 
-use eyre::{WrapErr, bail, ensure};
+use bao1x_api::signatures::SIGBLOCK_LEN;
+use eyre::{WrapErr, bail, ensure, eyre};
 use log::info;
+use xous_tools::sign_image::{Version, load_pem, sign_image};
 
 /// Largest flat `.bin` that fits the program space, 0x60060300..0x60160000
 /// (1,047,296 bytes; equal to FLASH `LENGTH` in `firmware/memory.x`).
@@ -12,6 +14,8 @@ use log::info;
 /// A RAM section that became loadable makes objcopy pad the file out to ~16 MiB.
 const MAX_BIN: usize = 0x6016_0000 - 0x6006_0300;
 const TARGET: &str = "riscv32imac-unknown-none-elf";
+/// Fixed, never bumped per build: a value above the chip's one-way counter raises it permanently.
+const ANTI_ROLLBACK: usize = 1;
 
 /// Why a build output failed its format check.
 #[derive(Debug, PartialEq, thiserror::Error)]
@@ -77,6 +81,26 @@ fn rust_objcopy(elf: &Path, bin_path: &Path) -> eyre::Result<()> {
     Ok(())
 }
 
+/// Prepend boot1's signature block to `bin`, signed with `key` as a `baremetal` image.
+fn sign(bin: &[u8], key: &Path) -> eyre::Result<Vec<u8>> {
+    let key = key.to_str().ok_or_else(|| eyre!("non-UTF-8 key path"))?;
+    let pem = load_pem(key).map_err(|e| eyre!("{e}"))?;
+    // semver all-zero, min semver unset: boot1 checks neither.
+    sign_image(
+        bin,
+        &pem,
+        false,
+        &None,
+        Some([0u8; 16]),
+        true,
+        SIGBLOCK_LEN,
+        Version::Bao1xV1,
+        Some("baremetal"),
+        Some(ANTI_ROLLBACK),
+    )
+    .map_err(|e| eyre!("{e}"))
+}
+
 fn build() -> eyre::Result<()> {
     let root = workspace_root();
     let target_dir = root.join("target");
@@ -128,5 +152,39 @@ mod tests {
     #[test]
     fn bin_small_ok() {
         assert!(check_bin(&vec![0x13u8; 1024]).is_ok());
+    }
+
+    fn dev_key() -> std::path::PathBuf {
+        workspace_root().join("devkey/dev.key")
+    }
+
+    #[test]
+    fn sign_puts_bin_after_sig_block() {
+        let bin = vec![0x13u8; 1000];
+        let img = sign(&bin, &dev_key()).unwrap();
+        assert_eq!(img.len(), 0x300 + bin.len());
+        // jal x0, +0x300: boot1 jumps to 0x60060000, this hops over the signature block.
+        assert_eq!(u32::from_le_bytes(img[0..4].try_into().unwrap()), 0x3000_006F);
+        assert_eq!(img[0x300..], bin[..]);
+    }
+
+    /// Verify the way boot1 does: Ed25519ph over SHA-512 of `img[0x84..0x84 + signed_len]`.
+    #[test]
+    fn sign_signature_verifies() {
+        use ed25519_dalek::{Signature, SigningKey};
+        use sha2::{Digest, Sha512};
+
+        let bin = vec![0x13u8; 1000];
+        let img = sign(&bin, &dev_key()).unwrap();
+
+        // An Ed25519 PKCS#8 key is a fixed 16-byte DER header followed by the 32-byte secret.
+        let der = xous_tools::sign_image::load_pem(dev_key().to_str().unwrap()).unwrap().contents;
+        assert_eq!(der.len(), 48);
+        let vk = SigningKey::from_bytes(der[16..].try_into().unwrap()).verifying_key();
+
+        let signed_len = u32::from_le_bytes(img[0x90..0x94].try_into().unwrap()) as usize;
+        let digest = Sha512::new_with_prefix(&img[0x84..0x84 + signed_len]);
+        let sig = Signature::from_bytes(img[4..68].try_into().unwrap());
+        vk.verify_prehashed(digest, None, &sig).unwrap();
     }
 }

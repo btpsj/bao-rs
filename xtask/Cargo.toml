@@ -5,7 +5,13 @@ edition = "2024"
 publish = false
 
 [dependencies]
+bao1x-api = "=0.1.0"
 env_logger = "0.11.11"
 eyre = "0.6.14"
 log = "0.4.35"
 thiserror = "2.0.21"
+xous-tools = "=0.1.2"
+
+[dev-dependencies]
+ed25519-dalek = { version = "2.1.0", features = ["digest"] }
+sha2 = "0.10.8"
