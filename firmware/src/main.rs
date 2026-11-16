@@ -2,6 +2,7 @@
 #![no_main]
 
 mod pb01;
+mod uart;
 mod udma;
 
 use embedded_hal::delay::DelayNs;
