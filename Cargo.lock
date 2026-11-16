@@ -393,6 +393,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "derive-mmio"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "acd34ba795703e849ab4136e8886fa2140935e2e27640d22c7da6ef5796324af"
+dependencies = [
+ "derive-mmio-macro",
+ "rustversion",
+]
+
+[[package]]
+name = "derive-mmio-macro"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bb3c030cba3e3eb0fac8a6877210e23e521535f725b72b137d1d5b8b0085c077"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -496,6 +517,7 @@ checksum = "1c66915cc5391097de7a2b0b972e8505aa33c0df401fd3a6811dbdb32881ba48"
 name = "firmware"
 version = "0.1.0"
 dependencies = [
+ "derive-mmio",
  "embedded-hal",
  "panic-halt",
  "riscv",
@@ -943,6 +965,12 @@ checksum = "cfcb3a22ef46e85b45de6ee7e79d063319ebb6594faafcf1c225ea92ab6e9b92"
 dependencies = [
  "semver",
 ]
+
+[[package]]
+name = "rustversion"
+version = "1.0.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 
 [[package]]
 name = "ryu"

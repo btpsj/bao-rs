@@ -2,6 +2,7 @@
 #![no_main]
 
 mod pb01;
+mod udma;
 
 use embedded_hal::delay::DelayNs;
 use embedded_hal::digital::OutputPin;
