@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 
+mod gpio;
 mod pb01;
 mod uart;
 mod udma;
