@@ -1,7 +1,5 @@
 //! UDMA: the DMA-backed peripheral group (UARTs, SPI, I2C, ...) and its shared control block.
 
-use core::sync::atomic::{AtomicBool, Ordering};
-
 use derive_mmio::Mmio;
 
 const CTRL_BASE: usize = 0x5010_0000;
@@ -36,17 +34,6 @@ pub struct Ctrl {
 }
 
 impl Ctrl {
-    /// Returns the control block the first time it is called, `None` after.
-    pub fn take() -> Option<Self> {
-        static TAKEN: AtomicBool = AtomicBool::new(false);
-        if TAKEN.swap(true, Ordering::Relaxed) {
-            None
-        } else {
-            // SAFETY: the flag guarantees this runs at most once.
-            Some(unsafe { Self::steal() })
-        }
-    }
-
     /// # Safety
     /// At most one `Ctrl` may exist: two would race on the read-modify-writes below.
     pub const unsafe fn steal() -> Self {

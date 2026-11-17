@@ -3,6 +3,7 @@
 
 mod gpio;
 mod pb01;
+mod peripherals;
 mod uart;
 mod udma;
 
