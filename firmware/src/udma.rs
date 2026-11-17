@@ -29,13 +29,13 @@ impl Periph {
 }
 
 /// Owner of the UDMA control registers. Zero-sized: the address lives in the type.
-pub struct Ctrl {
+pub struct UdmaCtrl {
     regs: OwnedCtrlRegs<CTRL_BASE>,
 }
 
-impl Ctrl {
+impl UdmaCtrl {
     /// # Safety
-    /// At most one `Ctrl` may exist: two would race on the read-modify-writes below.
+    /// At most one `UdmaCtrl` may exist: two would race on the read-modify-writes below.
     pub const unsafe fn steal() -> Self {
         Self { regs: unsafe { OwnedCtrlRegs::new() } }
     }
