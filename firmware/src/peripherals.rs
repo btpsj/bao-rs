@@ -3,12 +3,13 @@
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use crate::gpio::{PB01, PB13, PB14, Pin};
-use crate::udma::UdmaCtrl;
+use crate::udma::{Ifram0, UdmaCtrl};
 
 /// Every token is zero-sized; moving one into a driver is what grants access.
 #[allow(non_snake_case)]
 pub struct Peripherals {
     pub UDMA_CTRL: UdmaCtrl,
+    pub IFRAM0: Ifram0,
     pub PB01: PB01,
     pub PB13: PB13,
     pub PB14: PB14,
@@ -33,6 +34,7 @@ impl Peripherals {
         unsafe {
             Self {
                 UDMA_CTRL: UdmaCtrl::steal(),
+                IFRAM0: Ifram0::steal(),
                 PB01: Pin::steal(),
                 PB13: Pin::steal(),
                 PB14: Pin::steal(),
