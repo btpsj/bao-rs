@@ -120,13 +120,27 @@ impl<W: DmaWord> IframBuf<W> {
     }
 }
 
-impl IframBuf<u32> {
-    /// The same memory as bytes, for byte-oriented channels such as a UART.
-    /// There is no way back: bytes can't promise word alignment.
-    pub fn into_bytes(self) -> IframBuf<u8> {
-        let len = self.0.len() * size_of::<u32>();
+/// The same memory as bytes, for byte-oriented channels such as a UART.
+/// There is no way back: bytes can't promise word alignment.
+impl From<IframBuf<u32>> for IframBuf<u8> {
+    fn from(words: IframBuf<u32>) -> Self {
+        let len = words.0.len() * size_of::<u32>();
         // SAFETY: same memory and lifetime, still exclusively owned; bytes have no
         // alignment requirement and `len` covers exactly the words given up.
-        IframBuf(unsafe { slice::from_raw_parts_mut(self.0.as_mut_ptr().cast(), len) })
+        IframBuf(unsafe { slice::from_raw_parts_mut(words.0.as_mut_ptr().cast(), len) })
+    }
+}
+
+/// The whole region, for a program with a single DMA user.
+impl From<Ifram0> for IframBuf<u32> {
+    fn from(ifram: Ifram0) -> Self {
+        ifram.into_buf()
+    }
+}
+
+/// The whole region as bytes. `Into` doesn't chain, so this hop is spelled out.
+impl From<Ifram0> for IframBuf<u8> {
+    fn from(ifram: Ifram0) -> Self {
+        ifram.into_buf().into()
     }
 }

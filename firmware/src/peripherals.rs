@@ -3,6 +3,7 @@
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use crate::gpio::{PB01, PB13, PB14, Pin};
+use crate::uart::Uart2;
 use crate::udma::{Ifram0, UdmaCtrl};
 
 /// Every token is zero-sized; moving one into a driver is what grants access.
@@ -10,6 +11,7 @@ use crate::udma::{Ifram0, UdmaCtrl};
 pub struct Peripherals {
     pub UDMA_CTRL: UdmaCtrl,
     pub IFRAM0: Ifram0,
+    pub UART2: Uart2,
     pub PB01: PB01,
     pub PB13: PB13,
     pub PB14: PB14,
@@ -35,6 +37,7 @@ impl Peripherals {
             Self {
                 UDMA_CTRL: UdmaCtrl::steal(),
                 IFRAM0: Ifram0::steal(),
+                UART2: Uart2::steal(),
                 PB01: Pin::steal(),
                 PB13: Pin::steal(),
                 PB14: Pin::steal(),
