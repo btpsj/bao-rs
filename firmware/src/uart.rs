@@ -207,6 +207,15 @@ impl Uart {
         Self { regs: owned, tx_buf: tx_buf.into() }
     }
 
+    /// Reads a byte from the Uart RX buffer. Blocks until a byte is read.
+    pub fn read_byte(&mut self) -> u8 {
+        let mut regs = self.regs.borrow_mut();
+        while !regs.read_valid().rx_data_valid() {
+            spin_loop();
+        }
+        regs.read_data() as u8
+    }
+
     /// Starts sending `bytes` and returns how many were accepted, which is fewer than
     /// `bytes.len()` when they don't fit in the transmit buffer. Returns as soon as the
     /// transfer is started; call again for the rest, or [`flush`](Self::flush) to wait.
