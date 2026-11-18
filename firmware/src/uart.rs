@@ -1,5 +1,7 @@
 //! UDMA UART register definitions. Transmit is DMA-only; receive can be polled.
 
+use core::hint::spin_loop;
+
 use bitbybit::{bitenum, bitfield};
 use derive_mmio::Mmio;
 
@@ -203,5 +205,37 @@ impl Uart {
         regs.write_setup(setup);
 
         Self { regs: owned, tx_buf: tx_buf.into() }
+    }
+
+    /// Starts sending `bytes` and returns how many were accepted, which is fewer than
+    /// `bytes.len()` when they don't fit in the transmit buffer. Returns as soon as the
+    /// transfer is started; call again for the rest, or [`flush`](Self::flush) to wait.
+    pub fn write(&mut self, bytes: &[u8]) -> usize {
+        let mut regs = self.regs.borrow_mut();
+        // The previous transfer is still reading the buffer; let it finish first.
+        while regs.read_tx_cfg().en() {
+            spin_loop();
+        }
+        let count = self.tx_buf.fill_from(bytes);
+        if count == 0 {
+            // Nothing to send; a zero-length transfer is not known to be safe to start.
+            return 0;
+        }
+        regs.write_tx_saddr(self.tx_buf.dma_addr());
+        regs.write_tx_size(count as u32);
+        regs.write_tx_cfg(DmaCfg::DEFAULT.with_en(true));
+        count
+    }
+
+    /// Waits until everything written has left the wire.
+    pub fn flush(&mut self) {
+        let regs = self.regs.borrow();
+        // First the DMA handing bytes to the UART, then the UART shifting the last one out.
+        while regs.read_tx_cfg().en() {
+            spin_loop();
+        }
+        while regs.read_status().tx_busy() {
+            spin_loop();
+        }
     }
 }
