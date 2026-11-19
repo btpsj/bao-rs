@@ -541,7 +541,6 @@ dependencies = [
  "panic-halt",
  "riscv",
  "riscv-rt",
- "utralib",
 ]
 
 [[package]]
@@ -1224,15 +1223,6 @@ name = "utf8parse"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
-
-[[package]]
-name = "utralib"
-version = "0.1.27"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4fa025e57b78dd5178c313d35bb2888b20485fa513a8d7f89bd1747ddfc3d73e"
-dependencies = [
- "svd2utra",
-]
 
 [[package]]
 name = "vec_map"

@@ -3,7 +3,8 @@
 
 use embedded_hal::delay::DelayNs;
 use embedded_hal::digital::OutputPin;
-use firmware::pb01;
+use firmware::gpio::Output;
+use firmware::peripherals::Peripherals;
 use panic_halt as _;
 use riscv::delay::McycleDelay;
 
@@ -13,7 +14,8 @@ const HALF_PERIOD_MS: u32 = 2000;
 
 #[riscv_rt::entry]
 fn main() -> ! {
-    let mut pin = pb01::PB01::new();
+    let p = Peripherals::take().unwrap();
+    let mut pin = Output::new(p.PB01);
     let mut delay = McycleDelay::new(CPU_HZ);
     loop {
         pin.set_high().unwrap();
