@@ -1,14 +1,9 @@
 #![no_std]
 #![no_main]
 
-mod gpio;
-mod pb01;
-mod peripherals;
-mod uart;
-mod udma;
-
 use embedded_hal::delay::DelayNs;
 use embedded_hal::digital::OutputPin;
+use firmware::pb01;
 use panic_halt as _;
 use riscv::delay::McycleDelay;
 

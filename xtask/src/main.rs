@@ -1,4 +1,4 @@
-//! `cargo xtask build`: turns the firmware ELF into a signed, checked `.uf2`.
+//! `cargo xtask build`: turns each firmware binary's ELF into a signed, checked `.uf2`.
 
 use std::{
     env, fs, io,
@@ -214,6 +214,22 @@ fn run(cmd: &mut Command) -> eyre::Result<()> {
     Ok(())
 }
 
+/// The firmware binaries: every `firmware/src/bin/<name>.rs`, by cargo's convention.
+fn firmware_bins(root: &Path) -> eyre::Result<Vec<String>> {
+    let dir = root.join("firmware/src/bin");
+    let mut bins = Vec::new();
+    for entry in fs::read_dir(&dir).wrap_err_with(|| format!("reading {}", dir.display()))? {
+        let path = entry?.path();
+        if path.extension().is_some_and(|ext| ext == "rs") {
+            let name = path.file_stem().and_then(|stem| stem.to_str());
+            bins.push(name.ok_or_else(|| eyre!("non-UTF-8 file name {}", path.display()))?.to_owned());
+        }
+    }
+    ensure!(!bins.is_empty(), "no binaries in {}", dir.display());
+    bins.sort();
+    Ok(bins)
+}
+
 fn cargo_build(root: &Path, target_dir: &Path) -> eyre::Result<()> {
     info!("stage 1: build firmware");
     // Allows for cargo +nightly xtask build
@@ -225,6 +241,7 @@ fn cargo_build(root: &Path, target_dir: &Path) -> eyre::Result<()> {
             "--release",
             "-p",
             "firmware",
+            "--bins",
             "--target",
             TARGET,
         ])
@@ -273,22 +290,41 @@ fn build() -> eyre::Result<()> {
     let target_dir = root.join("target");
     // Cargo's layout: <target-dir>/<triple>/<profile>/<bin>
     let out = target_dir.join(TARGET).join("release");
-    let elf = out.join("firmware");
-    let bin_path = out.join("firmware.bin");
-    let img_path = out.join("firmware.img");
-    let uf2_path = out.join("firmware.uf2");
+    let bins = firmware_bins(root)?;
 
-    // A failed build must not leave the previous .uf2 behind to be flashed by mistake.
+    // A failed build must not leave a previous .uf2 behind to be flashed by mistake,
+    // including one from a binary that has since been renamed or removed.
     info!("stage 0: remove old outputs");
-    for path in [&img_path, &uf2_path] {
-        match fs::remove_file(path) {
-            Ok(()) => info!("removed {}", path.display()),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-            Err(e) => return Err(e).wrap_err_with(|| format!("removing {}", path.display())),
+    match fs::read_dir(&out) {
+        Ok(entries) => {
+            for entry in entries {
+                let path = entry?.path();
+                if path.extension().is_some_and(|ext| ext == "img" || ext == "uf2") {
+                    fs::remove_file(&path).wrap_err_with(|| format!("removing {}", path.display()))?;
+                    info!("removed {}", path.display());
+                }
+            }
         }
+        // Nothing has been built yet.
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e).wrap_err_with(|| format!("reading {}", out.display())),
     }
 
     cargo_build(root, &target_dir)?;
+    for name in &bins {
+        package(&out, name)?;
+    }
+    Ok(())
+}
+
+/// Turns one built ELF, `<out>/<name>`, into `<name>.img` and `<name>.uf2` next to it.
+fn package(out: &Path, name: &str) -> eyre::Result<()> {
+    info!("packaging {name}");
+    let elf = out.join(name);
+    let bin_path = out.join(format!("{name}.bin"));
+    let img_path = out.join(format!("{name}.img"));
+    let uf2_path = out.join(format!("{name}.uf2"));
+
     rust_objcopy(&elf, &bin_path)?;
 
     let bin = fs::read(&bin_path).wrap_err_with(|| format!("reading {}", bin_path.display()))?;

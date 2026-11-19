@@ -16,10 +16,10 @@ cargo install cargo-binutils  # for rust-objcopy
 
 ## Flashing
 
-- `cargo xtask build` to build the `firmware.uf2`
-  - `target/riscv32imac-unknown-none-elf/release/firmware.uf2`
+- `cargo xtask build` to build a `.uf2` for every binary in `firmware/src/bin/`
+  - e.g. `target/riscv32imac-unknown-none-elf/release/blink.uf2`
 - Hold PROG while connecting the Dabao board
-- Copy the `firmware.uf2` file to the BAOCHIP volume
+- Copy the `.uf2` file to the BAOCHIP volume
 - `sync` to flush the write
 - Press PROG again to load the firmware
 - Measure voltage on PB1 versus GND
