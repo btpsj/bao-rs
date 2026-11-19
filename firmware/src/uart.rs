@@ -124,29 +124,37 @@ impl Uart2 {
     }
 }
 
-/// A pin that can be UART2's receive line.
-pub trait RxPin {
+trait SealedRxPin {
     /// Routes the pin to the UART.
     fn setup(&mut self);
 }
 
-/// A pin that can be UART2's transmit line.
-pub trait TxPin {
+trait SealedTxPin {
     /// Routes the pin to the UART and lets it drive the line.
     fn setup(&mut self);
 }
 
-impl RxPin for PB13 {
+/// A pin that can be UART2's receive line.
+#[allow(private_bounds)]
+pub trait RxPin: SealedRxPin {}
+
+/// A pin that can be UART2's transmit line.
+#[allow(private_bounds)]
+pub trait TxPin: SealedTxPin {}
+
+impl SealedRxPin for PB13 {
     fn setup(&mut self) {
         self.set_as_af(1, false);
     }
 }
+impl RxPin for PB13 {}
 
-impl TxPin for PB14 {
+impl SealedTxPin for PB14 {
     fn setup(&mut self) {
         self.set_as_af(1, true);
     }
 }
+impl TxPin for PB14 {}
 
 pub struct Config {
     pub baud: u32,
