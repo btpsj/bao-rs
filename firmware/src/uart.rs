@@ -1,6 +1,6 @@
 //! UDMA UART register definitions. Transmit is DMA-only; receive can be polled.
 
-use core::hint::spin_loop;
+use core::{fmt, hint::spin_loop};
 
 use bitbybit::{bitenum, bitfield};
 use derive_mmio::Mmio;
@@ -246,5 +246,19 @@ impl Uart {
         while regs.read_status().tx_busy() {
             spin_loop();
         }
+    }
+}
+
+impl fmt::Write for Uart {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        let mut bytes = s.as_bytes();
+        while !bytes.is_empty() {
+            let sent = self.write(bytes);
+            if sent == 0 {
+                return Err(fmt::Error);
+            }
+            bytes = &bytes[sent..];
+        }
+        Ok(())
     }
 }
