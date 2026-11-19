@@ -40,7 +40,9 @@ impl UdmaCtrl {
     /// # Safety
     /// At most one `UdmaCtrl` may exist: two would race on the read-modify-writes below.
     pub const unsafe fn steal() -> Self {
-        Self { regs: unsafe { OwnedCtrlRegs::new() } }
+        Self {
+            regs: unsafe { OwnedCtrlRegs::new() },
+        }
     }
 
     /// Pulses the peripheral's reset line.

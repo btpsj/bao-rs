@@ -158,7 +158,12 @@ pub struct Config {
 impl Default for Config {
     /// 115200 baud, 8 data bits, no parity, 1 stop bit.
     fn default() -> Self {
-        Self { baud: 115_200, data_bits: DataBits::Eight, stop_bits: StopBits::One, parity: false }
+        Self {
+            baud: 115_200,
+            data_bits: DataBits::Eight,
+            stop_bits: StopBits::One,
+            parity: false,
+        }
     }
 }
 
@@ -204,7 +209,10 @@ impl Uart {
         regs.write_setup(setup.with_rx_clean_fifo(true));
         regs.write_setup(setup);
 
-        Self { regs: owned, tx_buf: tx_buf.into() }
+        Self {
+            regs: owned,
+            tx_buf: tx_buf.into(),
+        }
     }
 
     /// Reads a byte from the Uart RX buffer. Blocks until a byte is read.

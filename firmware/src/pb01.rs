@@ -3,7 +3,9 @@
 use core::convert::Infallible;
 
 use embedded_hal::digital::{ErrorType, OutputPin};
-use utralib::utra::iox::{HW_IOX_BASE, SFR_AFSEL_CRAFSEL2, SFR_GPIOOE_CRGOE1, SFR_GPIOOUT_CRGO1, SFR_PIOSEL};
+use utralib::utra::iox::{
+    HW_IOX_BASE, SFR_AFSEL_CRAFSEL2, SFR_GPIOOE_CRGOE1, SFR_GPIOOUT_CRGO1, SFR_PIOSEL,
+};
 use utralib::{CSR, Field};
 
 // CR = Control Register
