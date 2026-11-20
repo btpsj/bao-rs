@@ -1,8 +1,10 @@
 //! `cargo xtask build`: turns each firmware binary's ELF into a signed, checked `.uf2`.
-//! `cargo xtask flash <bin>`: builds, then programs that binary through boot1 and starts it.
+//! `cargo xtask flash <bin>`: builds, then programs that binary through boot1 and starts it;
+//! `--monitor` then stays connected to its UART.
 
 mod boot1;
 mod flash;
+mod monitor;
 
 use std::{
     env, fs, io,
@@ -372,11 +374,16 @@ fn main() -> eyre::Result<()> {
     match env::args().nth(1).as_deref() {
         Some("build") => build(),
         Some("flash") => {
-            let (mut bin, mut port) = (None, None);
+            let (mut bin, mut port, mut monitor, mut monitor_port) = (None, None, false, None);
             let mut args = env::args().skip(2);
             while let Some(arg) = args.next() {
                 match arg.as_str() {
                     "--port" => port = Some(args.next().ok_or_else(|| eyre!("--port needs a device path"))?),
+                    "--monitor" => monitor = true,
+                    "--monitor-port" => {
+                        monitor_port = Some(args.next().ok_or_else(|| eyre!("--monitor-port needs a device path"))?);
+                        monitor = true;
+                    }
                     _ if bin.is_none() && !arg.starts_with('-') => bin = Some(arg),
                     _ => bail!(USAGE),
                 }
@@ -384,16 +391,18 @@ fn main() -> eyre::Result<()> {
             let bin = bin.ok_or_else(|| eyre!(USAGE))?;
             let bins = firmware_bins(workspace_root())?;
             ensure!(bins.contains(&bin), "no firmware binary `{bin}`; there are {bins:?}");
+            let monitor = if monitor { Some(monitor::open(monitor_port)?) } else { None };
             build()?;
             let uf2_path = out_dir().join(format!("{bin}.uf2"));
             let uf2 = fs::read(&uf2_path).wrap_err_with(|| format!("reading {}", uf2_path.display()))?;
-            flash::flash(&uf2, port)
+            flash::flash(&uf2, port, monitor.as_deref())?;
+            monitor.map_or(Ok(()), monitor::run)
         }
         _ => bail!(USAGE),
     }
 }
 
-const USAGE: &str = "usage: cargo xtask build | cargo xtask flash <bin> [--port <device>]";
+const USAGE: &str = "usage: cargo xtask build | cargo xtask flash <bin> [--port <device>] [--monitor] [--monitor-port <device>]";
 
 #[cfg(test)]
 mod tests {

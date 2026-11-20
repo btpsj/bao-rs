@@ -11,14 +11,14 @@ use std::{
 
 use eyre::{WrapErr, bail, ensure};
 use log::info;
-use serialport::SerialPortType;
+use serialport::{ClearBuffer, SerialPort, SerialPortType};
 
 use crate::boot1::{self, Reply};
 use crate::{UF2_BLOCK, Uf2Header};
 
 /// boot1's USB serial port.
-const BOOT1_USB: (u16, u16) = (0x1d50, 0x6196);
-const BAUD: u32 = 115_200;
+pub const BOOT1_USB: (u16, u16) = (0x1d50, 0x6196);
+pub const BAUD: u32 = 115_200;
 /// How long one read blocks; the loops below poll with it.
 const READ_TIMEOUT: Duration = Duration::from_millis(50);
 /// How long to wait for the board to show up on USB after RESET.
@@ -135,8 +135,9 @@ fn find_port() -> eyre::Result<String> {
     }
 }
 
-/// Programs `uf2` (already checked by the build) and starts it.
-pub fn flash(uf2: &[u8], port: Option<String>) -> eyre::Result<()> {
+/// Programs `uf2` (already checked by the build) and starts it. `monitor`, the adapter on the
+/// firmware's UART, is emptied just before the start so it shows only the new firmware's output.
+pub fn flash(uf2: &[u8], port: Option<String>, monitor: Option<&dyn SerialPort>) -> eyre::Result<()> {
     let name = match port {
         Some(name) => name,
         None => find_port()?,
@@ -168,6 +169,9 @@ pub fn flash(uf2: &[u8], port: Option<String>) -> eyre::Result<()> {
          it is still in boot1 now and may not be after a reset"
     );
     info!("bootloader unchanged; starting the firmware");
+    if let Some(monitor) = monitor {
+        monitor.clear(ClearBuffer::Input)?;
+    }
     port.write_all(b"boot\r\n")?;
     port.flush()?;
     Ok(())
