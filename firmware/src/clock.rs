@@ -44,12 +44,6 @@ struct FreqValid {
     valid: u32,
 }
 
-impl FreqValid {
-    fn is_valid(&self) -> bool {
-        self.valid() == 0x0f
-    }
-}
-
 #[derive(Mmio)]
 #[repr(C)]
 struct CguRegs {
