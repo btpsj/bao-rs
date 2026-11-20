@@ -2,13 +2,14 @@
 
 use core::sync::atomic::{AtomicBool, Ordering};
 
-use crate::gpio::{PB01, PB13, PB14, Pin};
+use crate::{clock::Clock, gpio::{PB01, PB13, PB14, Pin}};
 use crate::uart::Uart2;
 use crate::udma::{Ifram0, UdmaCtrl};
 
 /// Every token is zero-sized; moving one into a driver is what grants access.
 #[allow(non_snake_case)]
 pub struct Peripherals {
+    pub CGU: Clock,
     pub UDMA_CTRL: UdmaCtrl,
     pub IFRAM0: Ifram0,
     pub UART2: Uart2,
@@ -35,6 +36,7 @@ impl Peripherals {
         // SAFETY: the caller upholds each token's "at most one" contract.
         unsafe {
             Self {
+                CGU: Clock::steal(),
                 UDMA_CTRL: UdmaCtrl::steal(),
                 IFRAM0: Ifram0::steal(),
                 UART2: Uart2::steal(),
