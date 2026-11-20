@@ -11,6 +11,7 @@ bytemuck = { version = "1.24", features = ["derive"] }
 env_logger = "0.11.11"
 eyre = "0.6.14"
 log = "0.4.35"
+serialport = "4.10.1"
 thiserror = "2.0.21"
 xous-tools = "=0.1.2"
 

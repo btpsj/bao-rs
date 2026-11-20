@@ -1,6 +1,8 @@
 //! `cargo xtask build`: turns each firmware binary's ELF into a signed, checked `.uf2`.
+//! `cargo xtask flash <bin>`: builds, then programs that binary through boot1 and starts it.
 
 mod boot1;
+mod flash;
 
 use std::{
     env, fs, io,
@@ -287,11 +289,15 @@ fn to_uf2(img: &[u8]) -> eyre::Result<Vec<u8>> {
     bin_to_uf2(&img.to_vec(), BAOCHIP_1X_UF2_FAMILY, BAREMETAL_START as u32).wrap_err("encoding UF2")
 }
 
+/// Where the firmware's build outputs go. Cargo's layout: <target-dir>/<triple>/<profile>/<bin>
+fn out_dir() -> PathBuf {
+    workspace_root().join("target").join(TARGET).join("release")
+}
+
 fn build() -> eyre::Result<()> {
     let root = workspace_root();
     let target_dir = root.join("target");
-    // Cargo's layout: <target-dir>/<triple>/<profile>/<bin>
-    let out = target_dir.join(TARGET).join("release");
+    let out = out_dir();
     let bins = firmware_bins(root)?;
 
     // A failed build must not leave a previous .uf2 behind to be flashed by mistake,
@@ -365,9 +371,29 @@ fn main() -> eyre::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     match env::args().nth(1).as_deref() {
         Some("build") => build(),
-        _ => bail!("usage: cargo xtask build"),
+        Some("flash") => {
+            let (mut bin, mut port) = (None, None);
+            let mut args = env::args().skip(2);
+            while let Some(arg) = args.next() {
+                match arg.as_str() {
+                    "--port" => port = Some(args.next().ok_or_else(|| eyre!("--port needs a device path"))?),
+                    _ if bin.is_none() && !arg.starts_with('-') => bin = Some(arg),
+                    _ => bail!(USAGE),
+                }
+            }
+            let bin = bin.ok_or_else(|| eyre!(USAGE))?;
+            let bins = firmware_bins(workspace_root())?;
+            ensure!(bins.contains(&bin), "no firmware binary `{bin}`; there are {bins:?}");
+            build()?;
+            let uf2_path = out_dir().join(format!("{bin}.uf2"));
+            let uf2 = fs::read(&uf2_path).wrap_err_with(|| format!("reading {}", uf2_path.display()))?;
+            flash::flash(&uf2, port)
+        }
+        _ => bail!(USAGE),
     }
 }
+
+const USAGE: &str = "usage: cargo xtask build | cargo xtask flash <bin> [--port <device>]";
 
 #[cfg(test)]
 mod tests {
