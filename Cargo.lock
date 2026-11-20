@@ -1436,6 +1436,7 @@ name = "xtask"
 version = "0.1.0"
 dependencies = [
  "bao1x-api",
+ "base64 0.20.0",
  "bytemuck",
  "ed25519-dalek",
  "env_logger 0.11.11",

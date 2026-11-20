@@ -1,5 +1,7 @@
 //! `cargo xtask build`: turns each firmware binary's ELF into a signed, checked `.uf2`.
 
+mod boot1;
+
 use std::{
     env, fs, io,
     path::{Path, PathBuf},

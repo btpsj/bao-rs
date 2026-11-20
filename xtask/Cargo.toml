@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 bao1x-api = "=0.1.0"
+base64 = "0.20"
 bytemuck = { version = "1.24", features = ["derive"] }
 env_logger = "0.11.11"
 eyre = "0.6.14"
