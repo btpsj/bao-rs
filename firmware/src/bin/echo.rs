@@ -16,7 +16,7 @@ use panic_halt as _;
 fn main() -> ! {
     let mut p = Peripherals::take().unwrap();
     let mut led = Output::new(p.PB01);
-    let mut uart = Uart::new(p.UART2, &mut p.UDMA_CTRL, p.PB13, p.PB14, p.IFRAM0, Config::default());
+    let mut uart = Uart::new(p.UART2, &mut p.UDMA_CTRL, p.PB13, p.PB14, p.IFRAM0, &p.CGU, Config::default());
 
     let mut line = [0u8; 64];
     let mut len = 0;

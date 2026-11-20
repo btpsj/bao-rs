@@ -20,6 +20,7 @@ fn main() -> ! {
         p.PB13,
         p.PB14,
         p.IFRAM0,
+        &p.CGU,
         Config::default(),
     );
     let mut delay = McycleDelay::new(CPU_HZ);

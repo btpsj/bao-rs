@@ -5,15 +5,10 @@ use core::{fmt, hint::spin_loop};
 use bitbybit::{bitenum, bitfield};
 use derive_mmio::Mmio;
 
-use crate::gpio::{PB13, PB14};
+use crate::{clock::Clock, gpio::{PB13, PB14}};
 use crate::udma::{IframBuf, Periph, UdmaCtrl};
 
 const UART2_BASE: usize = 0x5010_3000;
-
-/// The clock the UDMA peripherals run from, which the baud divisor is derived from.
-// From bao1x-api. A scope reading of 57.1 kHz for back-to-back 'U's at 115200 baud agrees
-// to within 1%; replace with a value read from the clock registers when clocks are configurable.
-const PERCLK_HZ: u32 = 100_000_000;
 
 #[bitenum(u2, exhaustive = true)]
 pub enum DataBits {
@@ -193,6 +188,7 @@ impl Uart {
         mut rx: impl RxPin,
         mut tx: impl TxPin,
         tx_buf: impl Into<IframBuf<u8>>,
+        clock: &Clock,
         config: Config,
     ) -> Self {
         ctrl.reset(Periph::Uart2);
@@ -204,7 +200,7 @@ impl Uart {
         let mut owned = unsafe { OwnedRegs::<UART2_BASE>::new() };
         let mut regs = owned.borrow_mut();
         // Rounded to the nearest divisor.
-        let div = (PERCLK_HZ + config.baud / 2) / config.baud;
+        let div = (clock.perclk_hz().to_Hz() + config.baud / 2) / config.baud;
         let setup = Setup::DEFAULT
             .with_parity_en(config.parity)
             .with_data_bits(config.data_bits)

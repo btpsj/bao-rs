@@ -23,7 +23,7 @@ const SQUARE_WAVE: &str = "UUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUU
 #[riscv_rt::entry]
 fn main() -> ! {
     let mut p = Peripherals::take().unwrap();
-    let mut uart = Uart::new(p.UART2, &mut p.UDMA_CTRL, p.PB13, p.PB14, p.IFRAM0, Config::default());
+    let mut uart = Uart::new(p.UART2, &mut p.UDMA_CTRL, p.PB13, p.PB14, p.IFRAM0, &p.CGU, Config::default());
     let mut delay = McycleDelay::new(CPU_HZ);
 
     let mut count = 0u32;
