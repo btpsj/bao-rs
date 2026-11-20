@@ -1,5 +1,5 @@
 //! UART2 echo demo: type a line, get it back as `<count>: <line>`; PB01 changes level
-//! once per line. 115200 8N1 on PB13 (RX) / PB14 (TX).
+//! once per line. 1_000_000 8N1 on PB13 (RX) / PB14 (TX).
 
 #![no_std]
 #![no_main]

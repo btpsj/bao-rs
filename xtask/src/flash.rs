@@ -18,7 +18,7 @@ use crate::{UF2_BLOCK, Uf2Header};
 
 /// boot1's USB serial port.
 pub const BOOT1_USB: (u16, u16) = (0x1d50, 0x6196);
-pub const BAUD: u32 = 115_200;
+pub const BAUD: u32 = 1_000_000;
 /// How long one read blocks; the loops below poll with it.
 const READ_TIMEOUT: Duration = Duration::from_millis(50);
 /// How long to wait for the board to show up on USB after RESET.

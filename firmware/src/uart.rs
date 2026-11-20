@@ -163,7 +163,7 @@ impl Default for Config {
     /// 115200 baud, 8 data bits, no parity, 1 stop bit.
     fn default() -> Self {
         Self {
-            baud: 115_200,
+            baud: 1_000_000,
             data_bits: DataBits::Eight,
             stop_bits: StopBits::One,
             parity: false,
