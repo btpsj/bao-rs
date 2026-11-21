@@ -24,11 +24,39 @@ cargo install cargo-binutils  # for rust-objcopy
 - Press PROG again to load the firmware
 - Measure voltage on PB1 versus GND
 
-## versus `xous-core` bare-metal applications
+## Notes
+
+- After `boot1` stops the USB, it automatically connects to UART2 at 1 Mbaud. This can lead to getting garbled output from the Uart driver. You can either configure the Uart driver and the serial port to read at 1 Mbaud, or introduce a small delay at the start of main to give it time to idle.
+
+```text
+// At 115200 baud
+���g��ݽ��
+
+// At 1 Mbaud
+Stopping USB...
+Booting with key 3/3(dev )
+Developer key detected, ensuring secrets are erased
+```
+
+- Interrupt masks needed for implementing timer interrupts since bao1x-chip doesn't implement a standard RISCV peripheral
+
+| Register | CSR number | Access | Purpose |
+|---|---|---|---|
+| `mim` | `0xBC0` | read/write | machine interrupt mask (1 = enabled) |
+| `mip` | `0xFC0` | read | machine interrupt lines pending |
+| `sim` | `0x9C0` | read/write | supervisor interrupt mask |
+| `sip` | `0xDC0` | read | supervisor interrupt lines pending |
+| `dci` | `0xCC0` | read | data-cache geometry |
+
+## Comparison with similar tools
+
+### `xous-core` bare-metal applications
 
 The [`xous-core`](https://github.com/betrusted-io/xous-core) provides a bare-metal application and provides APIs for various peripherals. This repo focuses on reimplementing much of that support, and also focuses on learning the build process, chip, integrating with Rust embedded ecosystem, and operating system development.
 
 Just as with `xous-core`, uploading an image with the Xous developer key will permanently erase the factory secrets and switch the chip to developer mode. We do reuse parts of the `bao1x-api` to avoid needing to permanently increment the anti-rollback counter.
+
+### `bao1x-bm-hal`
 
 ## License
 
