@@ -2,7 +2,7 @@
 
 use core::sync::atomic::{AtomicBool, Ordering};
 
-use crate::{clock::Clock, gpio::{PB01, PB13, PB14, Pin}};
+use crate::{clock::Clock, gpio::{PB01, PB13, PB14, Pin}, timer0::Timer0};
 use crate::uart::Uart2;
 use crate::udma::{Ifram0, UdmaCtrl};
 
@@ -10,6 +10,7 @@ use crate::udma::{Ifram0, UdmaCtrl};
 #[allow(non_snake_case)]
 pub struct Peripherals {
     pub CGU: Clock,
+    pub TIMER0: Timer0,
     pub UDMA_CTRL: UdmaCtrl,
     pub IFRAM0: Ifram0,
     pub UART2: Uart2,
@@ -37,6 +38,7 @@ impl Peripherals {
         unsafe {
             Self {
                 CGU: Clock::steal(),
+                TIMER0: Timer0::steal(),
                 UDMA_CTRL: UdmaCtrl::steal(),
                 IFRAM0: Ifram0::steal(),
                 UART2: Uart2::steal(),
