@@ -10,6 +10,8 @@ use firmware::{
 use panic_halt as _;
 use riscv_rt::core_interrupt;
 
+use crate::print::UART;
+
 #[core_interrupt(riscv::interrupt::Interrupt::MachineExternal)]
 unsafe fn timer0_irq() {
     let mut p = unsafe { Peripherals::steal() };

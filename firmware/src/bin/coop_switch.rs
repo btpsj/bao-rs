@@ -72,7 +72,7 @@ static CURRENT: AtomicUsize = AtomicUsize::new(0);
 
 fn yield_now() {
     let curr = CURRENT.load(Relaxed);
-    let next = (curr + 1) % 2 as usize;
+    let next = (curr + 1) % 2_usize;
     CURRENT.store(next, Relaxed);
     unsafe {
         context_switch(&raw mut TASKS[curr].sp, &raw mut TASKS[next].sp);

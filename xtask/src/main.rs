@@ -185,12 +185,12 @@ fn check_img(bin: &[u8], img: &[u8]) -> Result<SigInfo, CheckError> {
 /// The UF2 must carry `img` as consecutive 256-byte payloads addressed from `BAREMETAL_START`,
 /// all below `PROGRAM_END`, so boot1 writes it into our slot. Returns the block count.
 fn check_uf2(img: &[u8], uf2: &[u8]) -> Result<usize, CheckError> {
-    if uf2.len() % UF2_BLOCK != 0 {
+    if !uf2.len().is_multiple_of(UF2_BLOCK) {
         return Err(CheckError::Uf2Length { len: uf2.len() });
     }
     let total = uf2.len() / UF2_BLOCK;
     let mut payload = Vec::with_capacity(total * UF2_PAYLOAD);
-    for (block, raw) in uf2.chunks_exact(UF2_BLOCK).enumerate() {
+    for (block, raw) in uf2.as_chunks::<UF2_BLOCK>().0.iter().enumerate() {
         let h: Uf2Header = bytemuck::pod_read_unaligned(&raw[..size_of::<Uf2Header>()]);
         let magic_end: u32 = bytemuck::pod_read_unaligned(&raw[UF2_BLOCK - 4..]);
         if h.magic != UF2_MAGIC
@@ -377,8 +377,8 @@ fn rust_objcopy(elf: &Path, bin_path: &Path) -> eyre::Result<()> {
     info!("stage 2: ELF -> flat binary");
     run(Command::new("rust-objcopy")
         .args(["-O", "binary"])
-        .arg(&elf)
-        .arg(&bin_path))?;
+        .arg(elf)
+        .arg(bin_path))?;
     Ok(())
 }
 

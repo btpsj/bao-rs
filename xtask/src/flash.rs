@@ -109,7 +109,7 @@ fn audit(port: &mut (impl Read + Write)) -> eyre::Result<(String, String)> {
 /// flash with its USB handler live, so the wire must be idle while it writes.
 fn send_blocks(port: &mut (impl Read + Write), uf2: &[u8]) -> eyre::Result<()> {
     let total = uf2.len() / UF2_BLOCK;
-    for (i, block) in uf2.chunks_exact(UF2_BLOCK).enumerate() {
+    for (i, block) in uf2.as_chunks::<UF2_BLOCK>().0.iter().enumerate() {
         let h: Uf2Header = bytemuck::pod_read_unaligned(&block[..size_of::<Uf2Header>()]);
         let at = format!("block {}/{total} at {:#010x}", i + 1, h.target);
         match ask(
