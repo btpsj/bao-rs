@@ -42,7 +42,7 @@ Developer key detected, ensuring secrets are erased
 - Interrupt masks needed for implementing timer interrupts since bao1x-chip doesn't implement a standard RISCV peripheral
 
 | Register | CSR number | Access | Purpose |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `mim` | `0xBC0` | read/write | machine interrupt mask (1 = enabled) |
 | `mip` | `0xFC0` | read | machine interrupt lines pending |
 | `sim` | `0x9C0` | read/write | supervisor interrupt mask |
