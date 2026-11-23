@@ -1,5 +1,7 @@
-//! `cargo xtask build`: turns each firmware binary's ELF into a signed, checked `.uf2`.
-//! `cargo xtask flash <bin>`: builds, then programs that binary through boot1 and starts it;
+//! `cargo xtask build [<bin>]`: turns the ELF of that binary, or of every binary, into a
+//! signed, checked `.uf2`. Binaries are those of the crate the command is run from; from
+//! outside any crate (the workspace root) they are those of every crate except `xtask`.
+//! `cargo xtask flash <bin>`: builds that binary, then programs it through boot1 and starts it;
 //! `--monitor` then stays connected to its UART.
 
 mod boot1;
@@ -220,23 +222,83 @@ fn run(cmd: &mut Command) -> eyre::Result<()> {
     Ok(())
 }
 
-/// The firmware binaries: every `firmware/src/bin/<name>.rs`, by cargo's convention.
-fn firmware_bins(root: &Path) -> eyre::Result<Vec<String>> {
-    let dir = root.join("firmware/src/bin");
+/// One firmware binary and the workspace crate it belongs to.
+#[derive(Debug, Clone, PartialEq)]
+struct Bin {
+    package: String,
+    name: String,
+}
+
+/// The firmware binaries in `cargo metadata --no-deps` output, as seen from `cwd`: the `bin`
+/// targets of the crate `cwd` is inside, or of every workspace crate when it is in none.
+/// `xtask` is never included. All of them are built into one output directory.
+fn bins_from_metadata(json: &str, cwd: &Path) -> eyre::Result<Vec<Bin>> {
+    let meta: serde_json::Value = serde_json::from_str(json).wrap_err("parsing cargo metadata")?;
     let mut bins = Vec::new();
-    for entry in fs::read_dir(&dir).wrap_err_with(|| format!("reading {}", dir.display()))? {
-        let path = entry?.path();
-        if path.extension().is_some_and(|ext| ext == "rs") {
-            let name = path.file_stem().and_then(|stem| stem.to_str());
-            bins.push(name.ok_or_else(|| eyre!("non-UTF-8 file name {}", path.display()))?.to_owned());
+    // The crate directory containing `cwd`; the deepest one, should crates ever nest.
+    let mut current: Option<(usize, &str)> = None;
+    for package in meta["packages"].as_array().ok_or_else(|| eyre!("cargo metadata has no packages"))? {
+        let package_name = package["name"].as_str().ok_or_else(|| eyre!("package without a name"))?;
+        if package_name == "xtask" {
+            continue;
+        }
+        let dir = package["manifest_path"].as_str().map(Path::new).and_then(Path::parent);
+        if let Some(dir) = dir.filter(|dir| cwd.starts_with(dir)) {
+            let depth = dir.components().count();
+            if current.is_none_or(|(deepest, _)| depth > deepest) {
+                current = Some((depth, package_name));
+            }
+        }
+        for target in package["targets"].as_array().into_iter().flatten() {
+            if target["kind"].as_array().is_some_and(|kinds| kinds.iter().any(|kind| kind == "bin")) {
+                let name = target["name"].as_str().ok_or_else(|| eyre!("bin target without a name"))?;
+                bins.push(Bin { package: package_name.to_owned(), name: name.to_owned() });
+            }
         }
     }
-    ensure!(!bins.is_empty(), "no binaries in {}", dir.display());
-    bins.sort();
+    bins.sort_by(|a, b| a.name.cmp(&b.name));
+    // Two crates with the same binary name would overwrite each other's ELF and .uf2.
+    if let Some(pair) = bins.windows(2).find(|pair| pair[0].name == pair[1].name) {
+        bail!("binary name `{}` is used by more than one crate", pair[0].name);
+    }
+    if let Some((_, package)) = current {
+        bins.retain(|bin| bin.package == package);
+    }
+    ensure!(!bins.is_empty(), "no firmware binaries here");
     Ok(bins)
 }
 
-fn cargo_build(root: &Path, target_dir: &Path) -> eyre::Result<()> {
+/// Narrows `bins` to the one called `name`, or keeps them all when no name is given.
+fn select(mut bins: Vec<Bin>, name: Option<&str>) -> eyre::Result<Vec<Bin>> {
+    if let Some(name) = name {
+        let names: Vec<String> = bins.iter().map(|bin| bin.name.clone()).collect();
+        bins.retain(|bin| bin.name == name);
+        ensure!(!bins.is_empty(), "no firmware binary `{name}` here; there are {names:?}");
+    }
+    Ok(bins)
+}
+
+/// The binaries to work on: the one called `name`, or all of them, in the crate the command
+/// was run from (every firmware crate when run from outside one, e.g. the workspace root).
+fn selected_bins(name: Option<&str>) -> eyre::Result<Vec<Bin>> {
+    let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".into());
+    let output = Command::new(&cargo)
+        .current_dir(workspace_root())
+        .args(["metadata", "--no-deps", "--format-version", "1"])
+        .output()
+        .wrap_err_with(|| format!("could not start {cargo:?}"))?;
+    ensure!(
+        output.status.success(),
+        "cargo metadata failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json = String::from_utf8(output.stdout).wrap_err("cargo metadata is not UTF-8")?;
+    // Canonical, like the manifest paths cargo reports.
+    let cwd = env::current_dir().and_then(fs::canonicalize).wrap_err("finding the current directory")?;
+    select(bins_from_metadata(&json, &cwd)?, name)
+}
+
+fn cargo_build(root: &Path, target_dir: &Path, bins: &[Bin]) -> eyre::Result<()> {
     info!("stage 1: build firmware");
     // Allows for cargo +nightly xtask build
     let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".into());
@@ -245,12 +307,11 @@ fn cargo_build(root: &Path, target_dir: &Path) -> eyre::Result<()> {
         .args([
             "build",
             "--release",
-            "-p",
-            "firmware",
-            "--bins",
             "--target",
             TARGET,
         ])
+        // Exactly the selected binaries; a repeated -p is harmless.
+        .args(bins.iter().flat_map(|bin| ["-p", &bin.package, "--bin", &bin.name]))
         // The flag beats CARGO_TARGET_DIR and build.target-dir, so the ELF path below is fixed.
         .arg("--target-dir")
         .arg(target_dir))?;
@@ -296,33 +357,29 @@ fn out_dir() -> PathBuf {
     workspace_root().join("target").join(TARGET).join("release")
 }
 
-fn build() -> eyre::Result<()> {
+fn build(bins: &[Bin]) -> eyre::Result<()> {
     let root = workspace_root();
     let target_dir = root.join("target");
     let out = out_dir();
-    let bins = firmware_bins(root)?;
 
-    // A failed build must not leave a previous .uf2 behind to be flashed by mistake,
-    // including one from a binary that has since been renamed or removed.
+    // A failed build must not leave a previous .uf2 of the same binary behind to be flashed
+    // by mistake. Images of binaries not being built are left alone.
     info!("stage 0: remove old outputs");
-    match fs::read_dir(&out) {
-        Ok(entries) => {
-            for entry in entries {
-                let path = entry?.path();
-                if path.extension().is_some_and(|ext| ext == "img" || ext == "uf2") {
-                    fs::remove_file(&path).wrap_err_with(|| format!("removing {}", path.display()))?;
-                    info!("removed {}", path.display());
-                }
+    for bin in bins {
+        for ext in ["img", "uf2"] {
+            let path = out.join(format!("{}.{ext}", bin.name));
+            match fs::remove_file(&path) {
+                Ok(()) => info!("removed {}", path.display()),
+                // Not built before.
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e).wrap_err_with(|| format!("removing {}", path.display())),
             }
         }
-        // Nothing has been built yet.
-        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-        Err(e) => return Err(e).wrap_err_with(|| format!("reading {}", out.display())),
     }
 
-    cargo_build(root, &target_dir)?;
-    for name in &bins {
-        package(&out, name)?;
+    cargo_build(root, &target_dir, bins)?;
+    for bin in bins {
+        package(&out, &bin.name)?;
     }
     Ok(())
 }
@@ -372,7 +429,11 @@ fn main() -> eyre::Result<()> {
     // Show info! by default; RUST_LOG still overrides.
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     match env::args().nth(1).as_deref() {
-        Some("build") => build(),
+        Some("build") => {
+            let name = env::args().nth(2);
+            ensure!(env::args().count() <= 3 && !name.as_ref().is_some_and(|name| name.starts_with('-')), USAGE);
+            build(&selected_bins(name.as_deref())?)
+        }
         Some("flash") => {
             let (mut bin, mut port, mut monitor, mut monitor_port) = (None, None, false, None);
             let mut args = env::args().skip(2);
@@ -389,10 +450,10 @@ fn main() -> eyre::Result<()> {
                 }
             }
             let bin = bin.ok_or_else(|| eyre!(USAGE))?;
-            let bins = firmware_bins(workspace_root())?;
-            ensure!(bins.contains(&bin), "no firmware binary `{bin}`; there are {bins:?}");
+            // Checked before the monitor port is opened and anything is built.
+            let bins = selected_bins(Some(&bin))?;
             let monitor = if monitor { Some(monitor::open(monitor_port)?) } else { None };
-            build()?;
+            build(&bins)?;
             let uf2_path = out_dir().join(format!("{bin}.uf2"));
             let uf2 = fs::read(&uf2_path).wrap_err_with(|| format!("reading {}", uf2_path.display()))?;
             flash::flash(&uf2, port, monitor.as_deref())?;
@@ -402,11 +463,47 @@ fn main() -> eyre::Result<()> {
     }
 }
 
-const USAGE: &str = "usage: cargo xtask build | cargo xtask flash <bin> [--port <device>] [--monitor] [--monitor-port <device>]";
+const USAGE: &str = "usage: cargo xtask build [<bin>] | cargo xtask flash <bin> [--port <device>] [--monitor] [--monitor-port <device>]";
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bins_come_from_the_current_crate_or_all_but_xtask() {
+        let package = |name: &str, targets: &[(&str, &str)]| {
+            let targets: Vec<String> =
+                targets.iter().map(|(kind, name)| format!(r#"{{"kind":["{kind}"],"name":"{name}"}}"#)).collect();
+            format!(r#"{{"name":"{name}","manifest_path":"/ws/{name}/Cargo.toml","targets":[{}]}}"#, targets.join(","))
+        };
+        let metadata = |packages: &[String]| format!(r#"{{"packages":[{}]}}"#, packages.join(","));
+        let names = |json: &str, cwd: &str, name: Option<&str>| -> eyre::Result<Vec<String>> {
+            let bins = select(bins_from_metadata(json, Path::new(cwd))?, name)?;
+            Ok(bins.into_iter().map(|bin| format!("{}/{}", bin.package, bin.name)).collect())
+        };
+
+        let xtask = package("xtask", &[("bin", "xtask")]);
+        let firmware = package("firmware", &[("lib", "firmware"), ("bin", "echo"), ("bin", "blink")]);
+        let kernel = package("kernel", &[("bin", "kernel")]);
+        let all = metadata(&[xtask.clone(), firmware.clone(), kernel]);
+
+        // Outside any firmware crate: everything but xtask.
+        assert_eq!(names(&all, "/ws", None).unwrap(), ["firmware/blink", "firmware/echo", "kernel/kernel"]);
+        assert_eq!(names(&all, "/ws/xtask/src", None).unwrap().len(), 3);
+        // Inside a crate, at any depth: only that crate's.
+        assert_eq!(names(&all, "/ws/firmware/src/bin", None).unwrap(), ["firmware/blink", "firmware/echo"]);
+        assert_eq!(names(&all, "/ws/kernel", None).unwrap(), ["kernel/kernel"]);
+        // A name picks one binary, and only among those visible from here.
+        assert_eq!(names(&all, "/ws", Some("echo")).unwrap(), ["firmware/echo"]);
+        let err = names(&all, "/ws/kernel", Some("echo")).unwrap_err();
+        assert!(err.to_string().contains(r#"["kernel"]"#), "{err}");
+
+        let clash = package("other", &[("bin", "echo")]);
+        let err = names(&metadata(&[xtask.clone(), firmware, clash]), "/ws", None).unwrap_err();
+        assert!(err.to_string().contains("`echo`"), "{err}");
+
+        assert!(names(&metadata(&[xtask]), "/ws", None).is_err());
+    }
 
     #[test]
     fn bin_empty_rejected() {

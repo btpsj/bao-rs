@@ -16,8 +16,9 @@ cargo install cargo-binutils  # for rust-objcopy
 
 ## Flashing
 
-- `cargo xtask build` to build a `.uf2` for every binary in `firmware/src/bin/`
+- `cargo xtask build [<bin>]` to build a `.uf2` for that binary, or for every binary, of the crate you run it from (from the workspace root: every crate except `xtask`)
   - e.g. `target/riscv32imac-unknown-none-elf/release/blink.uf2`
+  - A new firmware crate must be listed in `members` in the root `Cargo.toml` and needs its own `build.rs` like `firmware/build.rs` (copy `../firmware/memory.x`, pass `-Tlink.x`); without it the image builds but does not boot
 - Hold PROG while connecting the Dabao board
 - Copy the `.uf2` file to the BAOCHIP volume
 - `sync` to flush the write
