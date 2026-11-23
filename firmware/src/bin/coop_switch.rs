@@ -81,7 +81,7 @@ fn yield_now() {
 
 fn task_a() -> ! {
     loop {
-        write!(uart(), "A");
+        let _ = write!(uart(), "A");
         yield_now();
         McycleDelay::new(350_000_000).delay_ms(1000)
     }
@@ -89,7 +89,7 @@ fn task_a() -> ! {
 
 fn task_b() -> ! {
     loop {
-        write!(uart(), "B");
+        let _ = write!(uart(), "B");
         yield_now();
         McycleDelay::new(350_000_000).delay_ms(1000)
     }
@@ -146,7 +146,7 @@ fn main() -> ! {
         // top points to the start of the stack but the stack grows downwards
         // addi sp, sp, {negative}, sw {reg}, {positive}(sp)
         let frame = top - FRAME_SIZE;
-        (frame as *mut usize).write(task_b as usize); // ra slot, offset 0
+        (frame as *mut usize).write(task_b as *const () as usize); // ra slot, offset 0
         TASKS[1].sp = frame;
     }
 
