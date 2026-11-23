@@ -917,6 +917,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "preemp_switch"
+version = "0.1.0"
+dependencies = [
+ "arbitrary-int 2.2.0",
+ "bitbybit 2.0.1",
+ "critical-section",
+ "derive-mmio",
+ "embedded-hal",
+ "firmware",
+ "fugit",
+ "panic-halt",
+ "riscv",
+ "riscv-rt",
+]
+
+[[package]]
 name = "proc-macro2"
 version = "1.0.107"
 source = "registry+https://github.com/rust-lang/crates.io-index"
