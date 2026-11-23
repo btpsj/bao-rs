@@ -18,14 +18,27 @@ pub static UART: SharedUart = SharedUart(Mutex::new(RefCell::new(None)));
 #[macro_export]
 macro_rules! println {
     ($($arg:tt)*) => {
-        use core::fmt::Write;
-        use riscv;
-        riscv::interrupt::free(|| {
+        {
+            use core::fmt::Write;
             critical_section::with(|cs| {
                 let mut uart = $crate::print::UART.0.borrow_ref_mut(cs);
                 let uart = uart.as_mut().unwrap();
                 let _ = writeln!(uart, $($arg)*);
             } )
-        })
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! print {
+    ($($arg:tt)*) => {
+        {
+            use core::fmt::Write;
+            critical_section::with(|cs| {
+                let mut uart = $crate::print::UART.0.borrow_ref_mut(cs);
+                let uart = uart.as_mut().unwrap();
+                let _ = write!(uart, $($arg)*);
+            } )
+        }
     };
 }
