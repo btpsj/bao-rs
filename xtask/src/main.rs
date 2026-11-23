@@ -51,7 +51,9 @@ enum CheckError {
     BinTooBig { len: usize },
     #[error("img is {len} bytes, expected {expected} (sig block + bin)")]
     ImgLength { len: usize, expected: usize },
-    #[error("img word 0 is {word:#010x}, expected jal x0,+{SIGBLOCK_LEN:#x} ({JAL_OVER_SIG:#010x})")]
+    #[error(
+        "img word 0 is {word:#010x}, expected jal x0,+{SIGBLOCK_LEN:#x} ({JAL_OVER_SIG:#010x})"
+    )]
     ImgJal { word: u32 },
     #[error("img payload after the sig block differs from the bin")]
     ImgPayload,
@@ -72,8 +74,14 @@ enum CheckError {
     #[error("uf2 block {block}: family={family:#010x}, expected {BAOCHIP_1X_UF2_FAMILY:#010x}")]
     Uf2Family { block: usize, family: u32 },
     #[error("uf2 block {block}: numbered {block_no} of {num_blocks}")]
-    Uf2Numbering { block: usize, block_no: u32, num_blocks: u32 },
-    #[error("uf2 block {block}: target={target:#010x}, not in order inside {BAREMETAL_START:#x}..{PROGRAM_END:#x}")]
+    Uf2Numbering {
+        block: usize,
+        block_no: u32,
+        num_blocks: u32,
+    },
+    #[error(
+        "uf2 block {block}: target={target:#010x}, not in order inside {BAREMETAL_START:#x}..{PROGRAM_END:#x}"
+    )]
     Uf2Target { block: usize, target: u32 },
     #[error("uf2 payloads differ from the img")]
     Uf2Payload,
@@ -116,18 +124,22 @@ struct SigInfo {
     anti_rollback: u32,
 }
 
-
 /// The image must be the signature block, starting with the jump over it, followed by `bin` unchanged,
 /// and carry the header fields boot1 checks. The header is read as bao1x-api's `SignatureInFlash`, the
 /// struct boot1 is built from; reading the bytes back still catches xous-tools writing something else.
 fn check_img(bin: &[u8], img: &[u8]) -> Result<SigInfo, CheckError> {
     let expected = SIGBLOCK_LEN + bin.len();
     if img.len() != expected {
-        return Err(CheckError::ImgLength { len: img.len(), expected });
+        return Err(CheckError::ImgLength {
+            len: img.len(),
+            expected,
+        });
     }
     let hdr: SignatureInFlash = bytemuck::pod_read_unaligned(&img[..size_of::<SignatureInFlash>()]);
     if hdr._jal_instruction != JAL_OVER_SIG {
-        return Err(CheckError::ImgJal { word: hdr._jal_instruction });
+        return Err(CheckError::ImgJal {
+            word: hdr._jal_instruction,
+        });
     }
     if img[SIGBLOCK_LEN..] != *bin {
         return Err(CheckError::ImgPayload);
@@ -135,22 +147,33 @@ fn check_img(bin: &[u8], img: &[u8]) -> Result<SigInfo, CheckError> {
 
     let sealed = hdr.sealed_data;
     if sealed.magic != MAGIC_NUMBER {
-        return Err(CheckError::ImgMagic { magic: sealed.magic });
+        return Err(CheckError::ImgMagic {
+            magic: sealed.magic,
+        });
     }
     if sealed.version != BAOCHIP_SIG_VERSION {
-        return Err(CheckError::ImgVersion { version: sealed.version });
+        return Err(CheckError::ImgVersion {
+            version: sealed.version,
+        });
     }
     // The signature covers everything from the sealed fields to the end of the image.
     let sealed_len = (img.len() - UNSIGNED_LEN) as u32;
     if sealed.signed_len != sealed_len {
-        return Err(CheckError::ImgSignedLen { signed_len: sealed.signed_len, expected: sealed_len });
+        return Err(CheckError::ImgSignedLen {
+            signed_len: sealed.signed_len,
+            expected: sealed_len,
+        });
     }
     if sealed.function_code != FunctionCode::Baremetal as u32 {
-        return Err(CheckError::ImgFunctionCode { function_code: sealed.function_code });
+        return Err(CheckError::ImgFunctionCode {
+            function_code: sealed.function_code,
+        });
     }
     // Still compared at run time: this checks the bytes xous-tools actually wrote.
     if sealed.anti_rollback != ANTI_ROLLBACK as u32 {
-        return Err(CheckError::ImgAntiRollback { anti_rollback: sealed.anti_rollback });
+        return Err(CheckError::ImgAntiRollback {
+            anti_rollback: sealed.anti_rollback,
+        });
     }
     Ok(SigInfo {
         version: sealed.version,
@@ -178,14 +201,24 @@ fn check_uf2(img: &[u8], uf2: &[u8]) -> Result<usize, CheckError> {
             return Err(CheckError::Uf2Header { block });
         }
         if h.family != BAOCHIP_1X_UF2_FAMILY {
-            return Err(CheckError::Uf2Family { block, family: h.family });
+            return Err(CheckError::Uf2Family {
+                block,
+                family: h.family,
+            });
         }
         if h.block_no as usize != block || h.num_blocks as usize != total {
-            return Err(CheckError::Uf2Numbering { block, block_no: h.block_no, num_blocks: h.num_blocks });
+            return Err(CheckError::Uf2Numbering {
+                block,
+                block_no: h.block_no,
+                num_blocks: h.num_blocks,
+            });
         }
         let target = h.target as usize;
         if target != BAREMETAL_START + block * UF2_PAYLOAD || target + UF2_PAYLOAD > PROGRAM_END {
-            return Err(CheckError::Uf2Target { block, target: h.target });
+            return Err(CheckError::Uf2Target {
+                block,
+                target: h.target,
+            });
         }
         let data = size_of::<Uf2Header>();
         payload.extend_from_slice(&raw[data..data + UF2_PAYLOAD]);
@@ -237,12 +270,20 @@ fn bins_from_metadata(json: &str, cwd: &Path) -> eyre::Result<Vec<Bin>> {
     let mut bins = Vec::new();
     // The crate directory containing `cwd`; the deepest one, should crates ever nest.
     let mut current: Option<(usize, &str)> = None;
-    for package in meta["packages"].as_array().ok_or_else(|| eyre!("cargo metadata has no packages"))? {
-        let package_name = package["name"].as_str().ok_or_else(|| eyre!("package without a name"))?;
+    for package in meta["packages"]
+        .as_array()
+        .ok_or_else(|| eyre!("cargo metadata has no packages"))?
+    {
+        let package_name = package["name"]
+            .as_str()
+            .ok_or_else(|| eyre!("package without a name"))?;
         if package_name == "xtask" {
             continue;
         }
-        let dir = package["manifest_path"].as_str().map(Path::new).and_then(Path::parent);
+        let dir = package["manifest_path"]
+            .as_str()
+            .map(Path::new)
+            .and_then(Path::parent);
         if let Some(dir) = dir.filter(|dir| cwd.starts_with(dir)) {
             let depth = dir.components().count();
             if current.is_none_or(|(deepest, _)| depth > deepest) {
@@ -250,16 +291,27 @@ fn bins_from_metadata(json: &str, cwd: &Path) -> eyre::Result<Vec<Bin>> {
             }
         }
         for target in package["targets"].as_array().into_iter().flatten() {
-            if target["kind"].as_array().is_some_and(|kinds| kinds.iter().any(|kind| kind == "bin")) {
-                let name = target["name"].as_str().ok_or_else(|| eyre!("bin target without a name"))?;
-                bins.push(Bin { package: package_name.to_owned(), name: name.to_owned() });
+            if target["kind"]
+                .as_array()
+                .is_some_and(|kinds| kinds.iter().any(|kind| kind == "bin"))
+            {
+                let name = target["name"]
+                    .as_str()
+                    .ok_or_else(|| eyre!("bin target without a name"))?;
+                bins.push(Bin {
+                    package: package_name.to_owned(),
+                    name: name.to_owned(),
+                });
             }
         }
     }
     bins.sort_by(|a, b| a.name.cmp(&b.name));
     // Two crates with the same binary name would overwrite each other's ELF and .uf2.
     if let Some(pair) = bins.windows(2).find(|pair| pair[0].name == pair[1].name) {
-        bail!("binary name `{}` is used by more than one crate", pair[0].name);
+        bail!(
+            "binary name `{}` is used by more than one crate",
+            pair[0].name
+        );
     }
     if let Some((_, package)) = current {
         bins.retain(|bin| bin.package == package);
@@ -273,7 +325,10 @@ fn select(mut bins: Vec<Bin>, name: Option<&str>) -> eyre::Result<Vec<Bin>> {
     if let Some(name) = name {
         let names: Vec<String> = bins.iter().map(|bin| bin.name.clone()).collect();
         bins.retain(|bin| bin.name == name);
-        ensure!(!bins.is_empty(), "no firmware binary `{name}` here; there are {names:?}");
+        ensure!(
+            !bins.is_empty(),
+            "no firmware binary `{name}` here; there are {names:?}"
+        );
     }
     Ok(bins)
 }
@@ -294,7 +349,9 @@ fn selected_bins(name: Option<&str>) -> eyre::Result<Vec<Bin>> {
     );
     let json = String::from_utf8(output.stdout).wrap_err("cargo metadata is not UTF-8")?;
     // Canonical, like the manifest paths cargo reports.
-    let cwd = env::current_dir().and_then(fs::canonicalize).wrap_err("finding the current directory")?;
+    let cwd = env::current_dir()
+        .and_then(fs::canonicalize)
+        .wrap_err("finding the current directory")?;
     select(bins_from_metadata(&json, &cwd)?, name)
 }
 
@@ -304,14 +361,12 @@ fn cargo_build(root: &Path, target_dir: &Path, bins: &[Bin]) -> eyre::Result<()>
     let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".into());
     run(Command::new(cargo)
         .current_dir(root)
-        .args([
-            "build",
-            "--release",
-            "--target",
-            TARGET,
-        ])
+        .args(["build", "--release", "--target", TARGET])
         // Exactly the selected binaries; a repeated -p is harmless.
-        .args(bins.iter().flat_map(|bin| ["-p", &bin.package, "--bin", &bin.name]))
+        .args(
+            bins.iter()
+                .flat_map(|bin| ["-p", &bin.package, "--bin", &bin.name]),
+        )
         // The flag beats CARGO_TARGET_DIR and build.target-dir, so the ELF path below is fixed.
         .arg("--target-dir")
         .arg(target_dir))?;
@@ -349,7 +404,8 @@ fn sign(bin: &[u8], key: &Path) -> eyre::Result<Vec<u8>> {
 
 /// Wrap the signed image in UF2 blocks for boot1's USB drive, addressed from `BAREMETAL_START`.
 fn to_uf2(img: &[u8]) -> eyre::Result<Vec<u8>> {
-    bin_to_uf2(&img.to_vec(), BAOCHIP_1X_UF2_FAMILY, BAREMETAL_START as u32).wrap_err("encoding UF2")
+    bin_to_uf2(&img.to_vec(), BAOCHIP_1X_UF2_FAMILY, BAREMETAL_START as u32)
+        .wrap_err("encoding UF2")
 }
 
 /// Where the firmware's build outputs go. Cargo's layout: <target-dir>/<triple>/<profile>/<bin>
@@ -431,7 +487,11 @@ fn main() -> eyre::Result<()> {
     match env::args().nth(1).as_deref() {
         Some("build") => {
             let name = env::args().nth(2);
-            ensure!(env::args().count() <= 3 && !name.as_ref().is_some_and(|name| name.starts_with('-')), USAGE);
+            ensure!(
+                env::args().count() <= 3
+                    && !name.as_ref().is_some_and(|name| name.starts_with('-')),
+                USAGE
+            );
             build(&selected_bins(name.as_deref())?)
         }
         Some("flash") => {
@@ -439,10 +499,18 @@ fn main() -> eyre::Result<()> {
             let mut args = env::args().skip(2);
             while let Some(arg) = args.next() {
                 match arg.as_str() {
-                    "--port" => port = Some(args.next().ok_or_else(|| eyre!("--port needs a device path"))?),
+                    "--port" => {
+                        port = Some(
+                            args.next()
+                                .ok_or_else(|| eyre!("--port needs a device path"))?,
+                        )
+                    }
                     "--monitor" => monitor = true,
                     "--monitor-port" => {
-                        monitor_port = Some(args.next().ok_or_else(|| eyre!("--monitor-port needs a device path"))?);
+                        monitor_port = Some(
+                            args.next()
+                                .ok_or_else(|| eyre!("--monitor-port needs a device path"))?,
+                        );
                         monitor = true;
                     }
                     _ if bin.is_none() && !arg.starts_with('-') => bin = Some(arg),
@@ -452,10 +520,15 @@ fn main() -> eyre::Result<()> {
             let bin = bin.ok_or_else(|| eyre!(USAGE))?;
             // Checked before the monitor port is opened and anything is built.
             let bins = selected_bins(Some(&bin))?;
-            let monitor = if monitor { Some(monitor::open(monitor_port)?) } else { None };
+            let monitor = if monitor {
+                Some(monitor::open(monitor_port)?)
+            } else {
+                None
+            };
             build(&bins)?;
             let uf2_path = out_dir().join(format!("{bin}.uf2"));
-            let uf2 = fs::read(&uf2_path).wrap_err_with(|| format!("reading {}", uf2_path.display()))?;
+            let uf2 =
+                fs::read(&uf2_path).wrap_err_with(|| format!("reading {}", uf2_path.display()))?;
             flash::flash(&uf2, port, monitor.as_deref())?;
             monitor.map_or(Ok(()), monitor::run)
         }
@@ -472,26 +545,43 @@ mod tests {
     #[test]
     fn bins_come_from_the_current_crate_or_all_but_xtask() {
         let package = |name: &str, targets: &[(&str, &str)]| {
-            let targets: Vec<String> =
-                targets.iter().map(|(kind, name)| format!(r#"{{"kind":["{kind}"],"name":"{name}"}}"#)).collect();
-            format!(r#"{{"name":"{name}","manifest_path":"/ws/{name}/Cargo.toml","targets":[{}]}}"#, targets.join(","))
+            let targets: Vec<String> = targets
+                .iter()
+                .map(|(kind, name)| format!(r#"{{"kind":["{kind}"],"name":"{name}"}}"#))
+                .collect();
+            format!(
+                r#"{{"name":"{name}","manifest_path":"/ws/{name}/Cargo.toml","targets":[{}]}}"#,
+                targets.join(",")
+            )
         };
         let metadata = |packages: &[String]| format!(r#"{{"packages":[{}]}}"#, packages.join(","));
         let names = |json: &str, cwd: &str, name: Option<&str>| -> eyre::Result<Vec<String>> {
             let bins = select(bins_from_metadata(json, Path::new(cwd))?, name)?;
-            Ok(bins.into_iter().map(|bin| format!("{}/{}", bin.package, bin.name)).collect())
+            Ok(bins
+                .into_iter()
+                .map(|bin| format!("{}/{}", bin.package, bin.name))
+                .collect())
         };
 
         let xtask = package("xtask", &[("bin", "xtask")]);
-        let firmware = package("firmware", &[("lib", "firmware"), ("bin", "echo"), ("bin", "blink")]);
+        let firmware = package(
+            "firmware",
+            &[("lib", "firmware"), ("bin", "echo"), ("bin", "blink")],
+        );
         let kernel = package("kernel", &[("bin", "kernel")]);
         let all = metadata(&[xtask.clone(), firmware.clone(), kernel]);
 
         // Outside any firmware crate: everything but xtask.
-        assert_eq!(names(&all, "/ws", None).unwrap(), ["firmware/blink", "firmware/echo", "kernel/kernel"]);
+        assert_eq!(
+            names(&all, "/ws", None).unwrap(),
+            ["firmware/blink", "firmware/echo", "kernel/kernel"]
+        );
         assert_eq!(names(&all, "/ws/xtask/src", None).unwrap().len(), 3);
         // Inside a crate, at any depth: only that crate's.
-        assert_eq!(names(&all, "/ws/firmware/src/bin", None).unwrap(), ["firmware/blink", "firmware/echo"]);
+        assert_eq!(
+            names(&all, "/ws/firmware/src/bin", None).unwrap(),
+            ["firmware/blink", "firmware/echo"]
+        );
         assert_eq!(names(&all, "/ws/kernel", None).unwrap(), ["kernel/kernel"]);
         // A name picks one binary, and only among those visible from here.
         assert_eq!(names(&all, "/ws", Some("echo")).unwrap(), ["firmware/echo"]);
@@ -546,12 +636,19 @@ mod tests {
         img
     }
 
-    const BAREMETAL_V1_ARB1: SigInfo = SigInfo { version: 0x100, function_code: 6, anti_rollback: 1 };
+    const BAREMETAL_V1_ARB1: SigInfo = SigInfo {
+        version: 0x100,
+        function_code: 6,
+        anti_rollback: 1,
+    };
 
     #[test]
     fn img_valid_ok() {
         let bin = vec![0x13u8; 100];
-        assert_eq!(check_img(&bin, &fake_img(&bin, 1, 6)), Ok(BAREMETAL_V1_ARB1));
+        assert_eq!(
+            check_img(&bin, &fake_img(&bin, 1, 6)),
+            Ok(BAREMETAL_V1_ARB1)
+        );
     }
 
     #[test]
@@ -559,7 +656,10 @@ mod tests {
         let bin = vec![0x13u8; 100];
         let mut img = fake_img(&bin, 1, 6);
         img[0x88..0x90].fill(0);
-        assert_eq!(check_img(&bin, &img), Err(CheckError::ImgMagic { magic: [0, 0] }));
+        assert_eq!(
+            check_img(&bin, &img),
+            Err(CheckError::ImgMagic { magic: [0, 0] })
+        );
     }
 
     #[test]
@@ -567,7 +667,10 @@ mod tests {
         let bin = vec![0x13u8; 100];
         let mut img = fake_img(&bin, 1, 6);
         img[0x84..0x88].copy_from_slice(&2u32.to_le_bytes()); // Precursor's LoaderPrehash
-        assert_eq!(check_img(&bin, &img), Err(CheckError::ImgVersion { version: 2 }));
+        assert_eq!(
+            check_img(&bin, &img),
+            Err(CheckError::ImgVersion { version: 2 })
+        );
     }
 
     #[test]
@@ -578,7 +681,10 @@ mod tests {
         img[0x90..0x94].copy_from_slice(&(good + 1).to_le_bytes());
         assert_eq!(
             check_img(&bin, &img),
-            Err(CheckError::ImgSignedLen { signed_len: good + 1, expected: good })
+            Err(CheckError::ImgSignedLen {
+                signed_len: good + 1,
+                expected: good
+            })
         );
     }
 
@@ -607,7 +713,10 @@ mod tests {
         img.push(0);
         assert_eq!(
             check_img(&bin, &img),
-            Err(CheckError::ImgLength { len: 0x300 + 101, expected: 0x300 + 100 })
+            Err(CheckError::ImgLength {
+                len: 0x300 + 101,
+                expected: 0x300 + 100
+            })
         );
     }
 
@@ -646,7 +755,10 @@ mod tests {
         uf2[12..16].copy_from_slice(&0x6005_FF00u32.to_le_bytes());
         assert_eq!(
             check_uf2(&img, &uf2),
-            Err(CheckError::Uf2Target { block: 0, target: 0x6005_FF00 })
+            Err(CheckError::Uf2Target {
+                block: 0,
+                target: 0x6005_FF00
+            })
         );
     }
 
@@ -654,14 +766,23 @@ mod tests {
     fn uf2_wrong_family_rejected() {
         let (img, mut uf2) = img_and_uf2();
         uf2[28..32].fill(0);
-        assert_eq!(check_uf2(&img, &uf2), Err(CheckError::Uf2Family { block: 0, family: 0 }));
+        assert_eq!(
+            check_uf2(&img, &uf2),
+            Err(CheckError::Uf2Family {
+                block: 0,
+                family: 0
+            })
+        );
     }
 
     #[test]
     fn uf2_truncated_rejected() {
         let (img, mut uf2) = img_and_uf2();
         uf2.pop();
-        assert_eq!(check_uf2(&img, &uf2), Err(CheckError::Uf2Length { len: 7 * 512 - 1 }));
+        assert_eq!(
+            check_uf2(&img, &uf2),
+            Err(CheckError::Uf2Length { len: 7 * 512 - 1 })
+        );
     }
 
     #[test]
@@ -677,7 +798,10 @@ mod tests {
         let img = sign(&bin, &dev_key()).unwrap();
         assert_eq!(img.len(), 0x300 + bin.len());
         // jal x0, +0x300: boot1 jumps to 0x60060000, this hops over the signature block.
-        assert_eq!(u32::from_le_bytes(img[0..4].try_into().unwrap()), 0x3000_006F);
+        assert_eq!(
+            u32::from_le_bytes(img[0..4].try_into().unwrap()),
+            0x3000_006F
+        );
         assert_eq!(img[0x300..], bin[..]);
     }
 

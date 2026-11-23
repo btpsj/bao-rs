@@ -15,7 +15,6 @@ pub mod mim {
         /// TIMER0 peripheral
         timer0: 30,
     }
-
 }
 
 pub mod mip {

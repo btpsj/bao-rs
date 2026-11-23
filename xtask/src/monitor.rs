@@ -63,7 +63,11 @@ pub fn run(mut port: Box<dyn SerialPort>) -> eyre::Result<()> {
                 stdout.write_all(&buf[..n])?;
                 stdout.flush()?;
             }
-            Err(e) if matches!(e.kind(), io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock) => {}
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+                ) => {}
             Err(e) => return Err(e).wrap_err("reading the monitor port"),
         }
     }
@@ -75,16 +79,31 @@ mod tests {
     use serialport::UsbPortInfo;
 
     fn usb(name: &str, vid: u16, pid: u16) -> SerialPortInfo {
-        let info = UsbPortInfo { vid, pid, serial_number: None, manufacturer: None, product: None };
-        SerialPortInfo { port_name: name.into(), port_type: SerialPortType::UsbPort(info) }
+        let info = UsbPortInfo {
+            vid,
+            pid,
+            serial_number: None,
+            manufacturer: None,
+            product: None,
+        };
+        SerialPortInfo {
+            port_name: name.into(),
+            port_type: SerialPortType::UsbPort(info),
+        }
     }
 
     #[test]
     fn picks_the_only_port_that_is_not_boot1() {
         let boot1 = usb("/dev/ttyACM0", BOOT1_USB.0, BOOT1_USB.1);
         let probe = usb("/dev/ttyACM1", 0x2e8a, 0x000c);
-        let onboard = SerialPortInfo { port_name: "/dev/ttyS0".into(), port_type: SerialPortType::Unknown };
-        assert_eq!(pick(&[boot1.clone(), onboard.clone(), probe.clone()]).unwrap(), "/dev/ttyACM1");
+        let onboard = SerialPortInfo {
+            port_name: "/dev/ttyS0".into(),
+            port_type: SerialPortType::Unknown,
+        };
+        assert_eq!(
+            pick(&[boot1.clone(), onboard.clone(), probe.clone()]).unwrap(),
+            "/dev/ttyACM1"
+        );
         assert!(pick(&[boot1.clone(), onboard]).is_err());
         assert!(pick(&[boot1, probe.clone(), usb("/dev/ttyUSB0", 0x0403, 0x6001)]).is_err());
     }

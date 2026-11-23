@@ -2,9 +2,13 @@
 
 use core::sync::atomic::{AtomicBool, Ordering};
 
-use crate::{clock::Clock, gpio::{PB01, PB13, PB14, Pin}, timer0::Timer0};
 use crate::uart::Uart2;
 use crate::udma::{Ifram0, UdmaCtrl};
+use crate::{
+    clock::Clock,
+    gpio::{PB01, PB13, PB14, Pin},
+    timer0::Timer0,
+};
 
 /// Every token is zero-sized; moving one into a driver is what grants access.
 #[allow(non_snake_case)]

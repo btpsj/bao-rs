@@ -37,7 +37,14 @@ fn read_some(port: &mut impl Read, into: &mut Vec<u8>) -> io::Result<usize> {
             into.extend_from_slice(&buf[..n]);
             Ok(n)
         }
-        Err(e) if matches!(e.kind(), io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock) => Ok(0),
+        Err(e)
+            if matches!(
+                e.kind(),
+                io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+            ) =>
+        {
+            Ok(0)
+        }
         Err(e) => Err(e),
     }
 }
@@ -60,7 +67,14 @@ fn ask<T>(
             return Ok(answer);
         }
         if Instant::now() >= deadline {
-            let tail: String = text.chars().rev().take(160).collect::<Vec<_>>().into_iter().rev().collect();
+            let tail: String = text
+                .chars()
+                .rev()
+                .take(160)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect();
             bail!("no answer within {timeout:?}; last received: {tail:?}");
         }
     }
@@ -75,7 +89,10 @@ fn drain(port: &mut impl Read) -> eyre::Result<()> {
         if read_some(port, &mut Vec::new())? > 0 {
             quiet_since = Instant::now();
         }
-        ensure!(Instant::now() < give_up, "the board keeps sending; is this boot1's port?");
+        ensure!(
+            Instant::now() < give_up,
+            "the board keeps sending; is this boot1's port?"
+        );
     }
     Ok(())
 }
@@ -95,7 +112,14 @@ fn send_blocks(port: &mut (impl Read + Write), uf2: &[u8]) -> eyre::Result<()> {
     for (i, block) in uf2.chunks_exact(UF2_BLOCK).enumerate() {
         let h: Uf2Header = bytemuck::pod_read_unaligned(&block[..size_of::<Uf2Header>()]);
         let at = format!("block {}/{total} at {:#010x}", i + 1, h.target);
-        match ask(port, &boot1::uf2_command(block), ACK_TIMEOUT, boot1::parse_reply).wrap_err_with(|| at.clone())? {
+        match ask(
+            port,
+            &boot1::uf2_command(block),
+            ACK_TIMEOUT,
+            boot1::parse_reply,
+        )
+        .wrap_err_with(|| at.clone())?
+        {
             Reply::Invalid => bail!("boot1 rejected {at}"),
             Reply::Wrote { len, addr } => ensure!(
                 len.is_none_or(|len| len == h.size) && addr.is_none_or(|addr| addr == h.target),
@@ -124,7 +148,10 @@ fn find_port() -> eyre::Result<String> {
             1 => return Ok(found.remove(0)),
             0 if Instant::now() < deadline => {
                 if !told {
-                    info!("waiting for boot1 on USB {:04x}:{:04x}: press RESET", BOOT1_USB.0, BOOT1_USB.1);
+                    info!(
+                        "waiting for boot1 on USB {:04x}:{:04x}: press RESET",
+                        BOOT1_USB.0, BOOT1_USB.1
+                    );
                     told = true;
                 }
                 thread::sleep(Duration::from_millis(250));
@@ -137,7 +164,11 @@ fn find_port() -> eyre::Result<String> {
 
 /// Programs `uf2` (already checked by the build) and starts it. `monitor`, the adapter on the
 /// firmware's UART, is emptied just before the start so it shows only the new firmware's output.
-pub fn flash(uf2: &[u8], port: Option<String>, monitor: Option<&dyn SerialPort>) -> eyre::Result<()> {
+pub fn flash(
+    uf2: &[u8],
+    port: Option<String>,
+    monitor: Option<&dyn SerialPort>,
+) -> eyre::Result<()> {
     let name = match port {
         Some(name) => name,
         None => find_port()?,
@@ -151,7 +182,9 @@ pub fn flash(uf2: &[u8], port: Option<String>, monitor: Option<&dyn SerialPort>)
     // A newline sent just after the port appears can be lost, so ask a few times.
     let mut prompt = Ok(());
     for _ in 0..5 {
-        prompt = ask(&mut port, "\r\n", PROMPT_TIMEOUT, |text| boot1::is_prompt(text).then_some(()));
+        prompt = ask(&mut port, "\r\n", PROMPT_TIMEOUT, |text| {
+            boot1::is_prompt(text).then_some(())
+        });
         if prompt.is_ok() {
             break;
         }
@@ -160,7 +193,10 @@ pub fn flash(uf2: &[u8], port: Option<String>, monitor: Option<&dyn SerialPort>)
     drain(&mut port)?;
 
     let before = audit(&mut port)?;
-    info!("bootloader digests read; writing {} blocks", uf2.len() / UF2_BLOCK);
+    info!(
+        "bootloader digests read; writing {} blocks",
+        uf2.len() / UF2_BLOCK
+    );
     send_blocks(&mut port, uf2)?;
     let after = audit(&mut port)?;
     ensure!(
@@ -191,7 +227,11 @@ mod tests {
 
     impl FakePort {
         fn new(replies: &[&str]) -> Self {
-            Self { replies: replies.iter().map(|r| r.to_string()).collect(), pending: Vec::new(), sent: Vec::new() }
+            Self {
+                replies: replies.iter().map(|r| r.to_string()).collect(),
+                pending: Vec::new(),
+                sent: Vec::new(),
+            }
         }
     }
 
@@ -199,7 +239,8 @@ mod tests {
         fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
             self.sent.extend_from_slice(buf);
             if buf.ends_with(b"\n") {
-                self.pending.extend(self.replies.pop_front().unwrap_or_default().into_bytes());
+                self.pending
+                    .extend(self.replies.pop_front().unwrap_or_default().into_bytes());
             }
             Ok(buf.len())
         }
@@ -228,7 +269,10 @@ mod tests {
     }
 
     fn commands(uf2: &[u8], count: usize) -> Vec<u8> {
-        uf2.chunks(UF2_BLOCK).take(count).flat_map(|b| boot1::uf2_command(b).into_bytes()).collect()
+        uf2.chunks(UF2_BLOCK)
+            .take(count)
+            .flat_map(|b| boot1::uf2_command(b).into_bytes())
+            .collect()
     }
 
     #[test]
@@ -246,7 +290,8 @@ mod tests {
     #[test]
     fn stops_when_the_acknowledged_address_differs() {
         let uf2 = three_blocks();
-        let mut port = FakePort::new(&["Wrote 256 to 0x60060000\r\n", "Wrote 256 to 0x60020100\r\n"]);
+        let mut port =
+            FakePort::new(&["Wrote 256 to 0x60060000\r\n", "Wrote 256 to 0x60020100\r\n"]);
         let err = send_blocks(&mut port, &uf2).unwrap_err();
         assert!(err.to_string().contains("block 2/3"), "{err}");
         // The third block was never sent.
@@ -273,7 +318,9 @@ mod tests {
     #[test]
     fn audit_reads_both_digests_and_discards_the_rest() {
         let (zero, one) = ("0a".repeat(64), "1b".repeat(64));
-        let reply = format!("boot0 partition: {zero}\r\nboot1 partition: {one}\r\nWrote nothing, invalid\r\n");
+        let reply = format!(
+            "boot0 partition: {zero}\r\nboot1 partition: {one}\r\nWrote nothing, invalid\r\n"
+        );
         let mut port = FakePort::new(&[&reply]);
         assert_eq!(audit(&mut port).unwrap(), (zero, one));
         assert!(port.pending.is_empty());

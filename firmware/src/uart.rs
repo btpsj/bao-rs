@@ -5,8 +5,11 @@ use core::{fmt, hint::spin_loop};
 use bitbybit::{bitenum, bitfield};
 use derive_mmio::Mmio;
 
-use crate::{clock::Clock, gpio::{PB13, PB14}};
 use crate::udma::{IframBuf, Periph, UdmaCtrl};
+use crate::{
+    clock::Clock,
+    gpio::{PB13, PB14},
+};
 
 const UART2_BASE: usize = 0x5010_3000;
 

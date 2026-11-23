@@ -35,9 +35,18 @@ pub fn parse_reply(received: &str) -> Option<Reply> {
         if let Some(at) = lower.find("wrote") {
             let mut words = line[at + "wrote".len()..].split_whitespace();
             return Some(match (words.next(), words.next(), words.next()) {
-                (Some(len), Some("to"), Some(addr)) => Reply::Wrote { len: len.parse().ok(), addr: hex(addr) },
-                (Some(addr), _, _) => Reply::Wrote { len: None, addr: hex(addr) },
-                _ => Reply::Wrote { len: None, addr: None },
+                (Some(len), Some("to"), Some(addr)) => Reply::Wrote {
+                    len: len.parse().ok(),
+                    addr: hex(addr),
+                },
+                (Some(addr), _, _) => Reply::Wrote {
+                    len: None,
+                    addr: hex(addr),
+                },
+                _ => Reply::Wrote {
+                    len: None,
+                    addr: None,
+                },
             });
         }
     }
@@ -50,14 +59,19 @@ fn hex(word: &str) -> Option<u32> {
 
 /// Whether `received` looks like boot1's answer to an empty line (its command list).
 pub fn is_prompt(received: &str) -> bool {
-    ["Commands include", "uf2", "bootwait"].iter().any(|word| received.contains(word))
+    ["Commands include", "uf2", "bootwait"]
+        .iter()
+        .any(|word| received.contains(word))
 }
 
 /// The SHA-512 digests of the boot0 and boot1 partitions from an `audit` printout,
 /// once both have arrived. Comparing them before and after a flash shows whether the
 /// bootloader was disturbed.
 pub fn parse_audit(received: &str) -> Option<(String, String)> {
-    Some((digest_after(received, "boot0 partition:")?, digest_after(received, "boot1 partition:")?))
+    Some((
+        digest_after(received, "boot0 partition:")?,
+        digest_after(received, "boot1 partition:")?,
+    ))
 }
 
 fn digest_after(text: &str, label: &str) -> Option<String> {
@@ -82,14 +96,29 @@ mod tests {
     fn reply_with_length_and_address() {
         assert_eq!(
             parse_reply("Wrote 256 to 0x60060000\r\n"),
-            Some(Reply::Wrote { len: Some(256), addr: Some(0x6006_0000) })
+            Some(Reply::Wrote {
+                len: Some(256),
+                addr: Some(0x6006_0000)
+            })
         );
     }
 
     #[test]
     fn reply_from_older_boot1() {
-        assert_eq!(parse_reply("Wrote 60060100\r\n"), Some(Reply::Wrote { len: None, addr: Some(0x6006_0100) }));
-        assert_eq!(parse_reply("Wrote\r\n"), Some(Reply::Wrote { len: None, addr: None }));
+        assert_eq!(
+            parse_reply("Wrote 60060100\r\n"),
+            Some(Reply::Wrote {
+                len: None,
+                addr: Some(0x6006_0100)
+            })
+        );
+        assert_eq!(
+            parse_reply("Wrote\r\n"),
+            Some(Reply::Wrote {
+                len: None,
+                addr: None
+            })
+        );
     }
 
     #[test]
@@ -111,7 +140,10 @@ mod tests {
         assert_eq!(parse_reply(echo), None);
         assert_eq!(
             parse_reply(&format!("{echo}Wrote 256 to 0x60060000\r\n")),
-            Some(Reply::Wrote { len: Some(256), addr: Some(0x6006_0000) })
+            Some(Reply::Wrote {
+                len: Some(256),
+                addr: Some(0x6006_0000)
+            })
         );
     }
 
@@ -125,7 +157,10 @@ mod tests {
     fn audit_digests() {
         let (zero, one) = ("0A".repeat(64), "1b".repeat(64));
         let text = format!("boot0 partition: {zero}\r\nboot1 partition: {one}\r\n");
-        assert_eq!(parse_audit(&text), Some((zero.to_ascii_lowercase(), one.clone())));
+        assert_eq!(
+            parse_audit(&text),
+            Some((zero.to_ascii_lowercase(), one.clone()))
+        );
         // boot1's digest still arriving.
         assert_eq!(parse_audit(&text[..text.len() - 20]), None);
         assert_eq!(parse_audit("boot0 partition: abcd\r\n"), None);

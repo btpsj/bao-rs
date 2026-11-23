@@ -1,5 +1,5 @@
 //! Timer Interrupt testing
-//! 
+//!
 //! Configures the TIMER0 to generate interrupts
 #![no_std]
 #![no_main]

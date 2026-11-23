@@ -7,9 +7,7 @@ use firmware::{
     uart::{Config, Uart},
 };
 use panic_halt as _;
-use riscv::{
-    register::{mcause, mepc, mtval},
-};
+use riscv::register::{mcause, mepc, mtval};
 
 #[riscv_rt::exception(riscv::interrupt::Exception::IllegalInstruction)]
 fn illegal_instruction(_trap_frame: &mut riscv_rt::TrapFrame) -> ! {
