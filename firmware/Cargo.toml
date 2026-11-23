@@ -10,10 +10,11 @@ bench = false
 
 [dependencies]
 riscv-rt = { version = "0.18.0", features = ["single-hart", "memory"] }
-riscv = "0.16.1"
+riscv = { version = "0.16.1", features = ["critical-section-single-hart"] }
 embedded-hal = "1.0.0"
 derive-mmio = "0.8"
 bitbybit = "2"
 arbitrary-int = "2"
 panic-halt = "1.0.0"
 fugit = "0.6.0"
+critical-section = "1.2.0"
