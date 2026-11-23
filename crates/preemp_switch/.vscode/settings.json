@@ -7,7 +7,7 @@
   // Scoping to -p firmware keeps xtask's std errors out of the Problems panel.
   "rust-analyzer.check.overrideCommand": [
     "cargo", "check",
-    "--package", "firmware",
+    "--package", "preemp_switch",
     "--target", "riscv32imac-unknown-none-elf",
     "--message-format=json"
   ]
