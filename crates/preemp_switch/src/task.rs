@@ -4,20 +4,21 @@ use core::{
     sync::atomic::{AtomicUsize, Ordering::Relaxed},
 };
 
-use crate::println;
+use embedded_hal::delay::DelayNs;
+use riscv::delay::McycleDelay;
+
+use crate::{CPU_HZ, print};
 
 pub static CURRENT: AtomicUsize = AtomicUsize::new(0);
 pub const N_TASKS: usize = 2;
 pub static mut TASKS: [Task; N_TASKS] = [Task::new(0, task_a), Task::new(1, task_b)];
 
-const FRAME_SIZE: usize = 64;
 const STACK_SIZE: usize = 4096;
 
 #[unsafe(naked)]
 pub unsafe extern "C" fn context_switch(curr_a0: *mut Context, next_a1: *const Context) {
     naked_asm!(
         // Store context for current task
-        "addi sp,sp,-{frame_size}",
         "sw ra, {ra}(a0)",
         "sw s0, {s0}(a0)",
         "sw s1, {s1}(a0)",
@@ -52,9 +53,7 @@ pub unsafe extern "C" fn context_switch(curr_a0: *mut Context, next_a1: *const C
         "lw s11, {s11}(a1)",
         "lw t0, {mepc}(a1)",
         "csrw mepc, t0",
-        "addi sp,sp,{frame_size}",
         "ret",
-        frame_size = const FRAME_SIZE,
         sp = const offset_of!(Context, sp),
         ra = const offset_of!(Context, ra),
         s0 = const offset_of!(Context, s0),
@@ -93,7 +92,7 @@ pub struct Context {
 }
 
 impl Context {
-    const fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             ra: 0,
             mepc: 0,
@@ -115,38 +114,28 @@ impl Context {
 }
 
 pub struct Task {
-    id: usize,
+    _id: usize,
     stack: [u8; STACK_SIZE],
     pub entry: fn() -> !,
     pub context: Context,
 }
 
 impl Task {
-    pub const fn new(id: usize, entry: fn() -> !) -> Self {
+    pub const fn new(_id: usize, entry: fn() -> !) -> Self {
         Task {
-            id,
+            _id,
             stack: [0u8; _],
             entry,
             context: Context::new(),
         }
     }
     pub fn seed(&mut self) {
-        // Seed task B
-        // unsafe {
         // RISCV calling convention is that sp must be a multiple of 16
         // "& !15" clears the lower bits to make sure that it is always a multiple of 16
         let top = ((&raw mut self.stack) as usize + STACK_SIZE) & !15;
-        // top points to the start of the stack but the stack grows downwards
-        // addi sp, sp, {negative}, sw {reg}, {positive}(sp)
-        let frame = top - FRAME_SIZE;
-        // ra slot, offset 0
-        unsafe {
-            (frame as *mut usize).write(self.entry as *const () as usize);
-        }
-        self.context.sp = frame;
+        self.context.sp = top;
         self.context.ra = task_start as *const () as usize;
     }
-    // }
 }
 
 extern "C" fn task_start() -> ! {
@@ -157,12 +146,14 @@ extern "C" fn task_start() -> ! {
 
 fn task_a() -> ! {
     loop {
-        println!("A");
+        print!("A");
+        McycleDelay::new(CPU_HZ).delay_ms(200);
     }
 }
 
 fn task_b() -> ! {
     loop {
-        println!("B");
+        print!("B");
+        McycleDelay::new(CPU_HZ).delay_ms(200);
     }
 }
