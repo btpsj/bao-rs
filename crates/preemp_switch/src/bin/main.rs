@@ -22,9 +22,6 @@
 #![no_std]
 #![no_main]
 
-mod print;
-mod task;
-
 use core::sync::atomic::Ordering::Relaxed;
 
 use firmware::{
@@ -37,12 +34,10 @@ use panic_halt as _;
 use riscv::register::mie;
 use riscv_rt::core_interrupt;
 
-use crate::{
-    print::UART,
-    task::{CURRENT, Context, N_TASKS, TASKS, context_switch},
+use preemp_switch::{
+    CPU_HZ, print::UART, println, task::{CURRENT, Context, N_TASKS, TASKS, context_switch},
 };
 
-const CPU_HZ: u32 = 350_000_000;
 
 #[core_interrupt(riscv::interrupt::Interrupt::MachineExternal)]
 unsafe fn timer0_irq() {
