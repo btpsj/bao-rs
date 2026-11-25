@@ -3,7 +3,10 @@ use core::cell::RefCell;
 use critical_section::Mutex;
 use firmware::uart::Uart;
 
-pub struct SharedUart(pub(crate) Mutex<RefCell<Option<Uart>>>);
+// TODO explore ways to avoid having the inside of SharedUart pub
+// One suggested approach is to have a doc hidden _print(fmt::Args) and the macros call the hidden
+// function + format_args!.
+pub struct SharedUart(pub Mutex<RefCell<Option<Uart>>>);
 
 impl SharedUart {
     pub fn init(&self, uart: Uart) {

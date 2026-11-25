@@ -1,0 +1,14 @@
+{
+  // Analyze firmware with its real target so no_std / cfg / riscv resolve.
+  "rust-analyzer.cargo.target": "riscv32imac-unknown-none-elf",
+
+  // Flycheck ONLY the firmware package for the riscv target. This is what
+  // surfaces rustc lints (unused_mut, unused_variables, dead_code, etc.).
+  // Scoping to -p firmware keeps xtask's std errors out of the Problems panel.
+  "rust-analyzer.check.overrideCommand": [
+    "cargo", "check",
+    "--package", "preemp_switch",
+    "--target", "riscv32imac-unknown-none-elf",
+    "--message-format=json"
+  ]
+}
